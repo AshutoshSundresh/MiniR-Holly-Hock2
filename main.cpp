@@ -16,30 +16,23 @@ extern "C"
 void main() {
 	calcInit(); //backup screen and init some variables
 
-	// Put your app's code here!
-
-	//Example for fillScreen(color);
-	fillScreen(color(0,0,0));
-
-	//Example for Debug_Printf(x,y,invert_color,0,format_string) //(small text)
-	Debug_Printf(10,1,false,0,"MiniR v0.1");
-
-	//Example for Debug_PrintString(string, invert_color) //(big text)
-	Debug_SetCursorPosition(2,2);
-	Debug_PrintString("Initializing...",0);
+	UI ui;
+	ui.Init();
 
 	//use this command to actually update the screen 
 	LCD_Refresh();
 
-	//Example for getKey
 	while(true){
-		uint32_t key1, key2;	//First create variables
-		getKey(&key1, &key2);	//then read the keys
+		ui.Update();
+		ui.Draw();
+		LCD_Refresh();
 		
-        // Simple exit condition for now
-		if(testKey(key1, key2, KEY_CLEAR)){ 
-			break;
-		}
+		// Optional: break on specific key combination handled inside UI or here
+		// For now, let's keep it running. 
+		// If we need a way to exit:
+		uint32_t k1, k2; 
+		getKey(&k1, &k2);
+		if(testKey(k1, k2, KEY_CLEAR)) break;
 	}
 
 	calcEnd(); //restore screen and do stuff
