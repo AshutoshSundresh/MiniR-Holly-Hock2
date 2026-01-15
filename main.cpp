@@ -2,6 +2,7 @@
 #include <sdk/calc/calc.hpp>
 #include <sdk/os/lcd.hpp>
 #include <sdk/os/debug.hpp>
+#include "ui/UI.hpp"
 
 /*
  * Fill this section in with some information about your app.
