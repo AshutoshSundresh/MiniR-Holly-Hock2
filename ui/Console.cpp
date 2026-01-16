@@ -27,9 +27,10 @@ void Console::Enter() {
     std::string full = prompt + current_line;
     scrollback.push_back(full);
     
-    // Check command (mock runtime)
-    // If we had the runtime, we would call it here.
-    // For now, if line is empty, do nothing interesting.
+    // Push for execution
+    if (!current_line.empty()) {
+        pending_command = current_line;
+    }
     
     current_line = "";
     // Scroll to bottom

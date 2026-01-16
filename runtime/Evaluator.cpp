@@ -170,4 +170,43 @@ namespace Evaluator {
                 return exp;
         }
     }
+
+    std::string ToString(RValuePtr v) {
+        if (!v || v->type == RType::NIL) return "NULL";
+        if (v->type == RType::DOUBLE) {
+            std::string res = "[1] "; // R style
+            for(double d : v->d_vec) {
+                // Simple float to string, maybe trim precision
+                std::string s = std::to_string(d);
+                // Trim trailing zeros
+                s.erase ( s.find_last_not_of('0') + 1, std::string::npos );
+                if(s.back() == '.') s.pop_back();
+                res += s + " ";
+            }
+            return res;
+        }
+        if (v->type == RType::INTEGER || v->type == RType::LOGICAL) {
+             std::string res = "[1] ";
+             for(int i : v->i_vec) {
+                 if (v->type == RType::LOGICAL) {
+                     if(i==1) res += "TRUE ";
+                     else if(i==0) res += "FALSE ";
+                     else res += "NA ";
+                 } else {
+                     res += std::to_string(i) + " ";
+                 }
+             }
+             return res;
+        }
+        if (v->type == RType::CHARACTER) {
+            std::string res = "[1] ";
+            for(const auto& s : v->s_vec) res += "\"" + s + "\" ";
+            return res;
+        }
+        if (v->type == RType::ERROR) return "Error: " + v->sym_name;
+        if (v->type == RType::BUILTIN) return "<builtin>";
+        if (v->type == RType::CLOSURE) return "<function>";
+        
+        return "<unknown>";
+    }
 }

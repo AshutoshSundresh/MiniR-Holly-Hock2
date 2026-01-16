@@ -1,10 +1,17 @@
 #include "UI.hpp"
 #include <sdk/os/lcd.hpp>
+#include "../runtime/Lexer.hpp"
+#include "../runtime/Parser.hpp"
+#include "../runtime/Evaluator.hpp"
 
 void UI::Init() {
     console.Init();
     keyboard.Init();
     keyboard_active = true;
+    
+    // Init Runtime
+    global_env = std::make_shared<RValue>(RType::ENV);
+    Evaluator::InitGlobalEnv(global_env);
 }
 
 void UI::Update() {
@@ -13,13 +20,32 @@ void UI::Update() {
     getKey(&key1, &key2);
     
     if (keyboard_active) {
-        keyboard.HandleInput(key1, key2, console);
-    } else {
-        // Handle scroll keys for console?
+        if (keyboard.HandleInput(key1, key2, console)) {
+             // Input handled
+        }
     }
     
-    // F-Keys to toggle keyboard?
-    // Not implemented yet
+    // Check for pending command
+    if (console.HasPendingCommand()) {
+        std::string src = console.PopPendingCommand();
+        if (src == "cls") {
+             // console.Clear(); // Todo
+        } else {
+             // REPL
+             Lexer lex(src);
+             auto tokens = lex.Tokenize();
+             Parser parser(tokens);
+             RValuePtr ast = parser.Parse();
+             
+             if (parser.HasError()) {
+                 console.PrintLine(("Error: " + parser.GetError()).c_str());
+             } else {
+                 RValuePtr res = Evaluator::Eval(ast, global_env);
+                 std::string out = Evaluator::ToString(res);
+                 console.PrintLine(out.c_str());
+             }
+        }
+    }
 }
 
 void UI::Draw() {
