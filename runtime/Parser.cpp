@@ -259,19 +259,34 @@ RValuePtr Parser::ParseBlock() {
 RValuePtr Parser::ParseCall(RValuePtr callee) {
     auto call = std::make_shared<RValue>(RType::LIST);
     call->l_vec.push_back(callee);
+    
+    // Attribute for names
+    auto names = std::make_shared<RValue>(RType::CHARACTER);
+    names->s_vec.push_back(""); // Name for callee (empty)
+    bool has_names = false;
+
     if (!Check(TokenType::rparen)) {
         do {
             // Named args? name=val
              if (tokens[pos].type == TokenType::identifier && tokens[pos+1].type == TokenType::eq) {
-                 // Named arg
-                 // Implementation: Wrap in specific structure or just rely on runtime?
-                 // Simple R AST: names attribute on the call list?
-                 ParseExpression(); // Just parse value for now, ignore names to start
+                 Token name = tokens[pos];
+                 Advance(); // Eat name
+                 Advance(); // Eat =
+                 
+                 names->s_vec.push_back(name.text);
+                 has_names = true;
+                 
+                 call->l_vec.push_back(ParseExpression());
              } else {
+                 names->s_vec.push_back("");
                  call->l_vec.push_back(ParseExpression()); 
              }
         } while (Match(TokenType::comma));
     }
     Consume(TokenType::rparen, "Expect ')'");
+    
+    if (has_names) {
+        call->attributes["names"] = names;
+    }
     return call;
 }

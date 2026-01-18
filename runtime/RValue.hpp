@@ -22,7 +22,7 @@ struct RValue;
 using RValuePtr = std::shared_ptr<RValue>;
 
 // Forward decl for Builtin function pointer
-using BuiltinFunc = RValuePtr (*)(const std::vector<RValuePtr>& args, RValuePtr env);
+using BuiltinFunc = RValuePtr (*)(const std::vector<RValuePtr>& args, const std::vector<std::string>& arg_names, RValuePtr env);
 
 struct RValue {
     RType type;
@@ -51,6 +51,29 @@ struct RValue {
     std::map<std::string, RValuePtr> frame;
     RValuePtr parent_env;
 
+    // Generic helpers
+    int Length() const {
+        if (type == RType::DOUBLE) return d_vec.size();
+        if (type == RType::INTEGER || type == RType::LOGICAL) return i_vec.size();
+        if (type == RType::CHARACTER) return s_vec.size();
+        if (type == RType::LIST) return l_vec.size();
+        return 0; // NULL or single?
+    }
+    
+    double GetDouble(int i) const {
+        if (i < 0 || i >= Length()) return 0.0; // Todo: NA?
+        if (type == RType::DOUBLE) return d_vec[i];
+        if (type == RType::INTEGER || type == RType::LOGICAL) return (double)i_vec[i];
+        return 0.0;
+    }
+
+    int GetInt(int i) const {
+         if (i < 0 || i >= Length()) return 0;
+         if (type == RType::INTEGER || type == RType::LOGICAL) return i_vec[i];
+         if (type == RType::DOUBLE) return (int)d_vec[i];
+         return 0;
+    }
+    
     RValue(RType t) : type(t) {}
 };
 
