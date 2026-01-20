@@ -1950,4 +1950,42 @@ namespace Evaluator {
                 return exp;
         }
     }
+
+
+    // --- TO STRING ---
+    std::string ToString(RValuePtr v) {
+        if (!v) return "NULL";
+        if (v->type == RType::NIL) return "NULL";
+        if (v->type == RType::ERROR) return "Error: " + v->sym_name;
+        
+        std::string s = "";
+        
+        // Prefix with [1] if vector?
+        if (v->type == RType::DOUBLE || v->type == RType::INTEGER || v->type == RType::LOGICAL || v->type == RType::CHARACTER) {
+            // Simple Print
+             s += "[1] ";
+             for(int i=0; i<v->Length(); ++i) {
+                 if (i > 0) s += " ";
+                 if (v->type == RType::DOUBLE) s += std::to_string(v->d_vec[i]);
+                 else if (v->type == RType::INTEGER) s += std::to_string(v->i_vec[i]);
+                 else if (v->type == RType::LOGICAL) s += (v->i_vec[i] ? "TRUE" : "FALSE");
+                 else if (v->type == RType::CHARACTER) s += "\"" + v->s_vec[i] + "\"";
+             }
+             return s;
+        }
+        
+        if (v->type == RType::LIST) {
+            for(int i=0; i<v->Length(); ++i) {
+                s += "[[" + std::to_string(i+1) + "]]\n";
+                s += ToString(v->l_vec[i]) + "\n";
+            }
+            return s;
+        }
+        
+        if (v->type == RType::CLOSURE) return "<function>";
+        if (v->type == RType::BUILTIN) return "<builtin>";
+        if (v->type == RType::ENV) return "<environment>";
+        
+        return "<unknown>";
+    }
 }
