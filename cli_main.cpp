@@ -9,6 +9,29 @@
 // We need to implement ToString if it wasn't implemented or exposed correctly.
 // Assuming it is exposed in Evaluator.hpp as verified.
 
+namespace {
+    int BalanceDelims(const std::string& s) {
+        int paren = 0, brace = 0, bracket = 0;
+        bool in_single = false, in_double = false;
+        for (size_t i = 0; i < s.size(); ++i) {
+            char c = s[i];
+            if (!in_double && c == '\'') { in_single = !in_single; continue; }
+            if (!in_single && c == '"') { in_double = !in_double; continue; }
+            if (in_single || in_double) continue;
+            switch (c) {
+                case '(': paren++; break;
+                case ')': paren--; break;
+                case '{': brace++; break;
+                case '}': brace--; break;
+                case '[': bracket++; break;
+                case ']': bracket--; break;
+                default: break;
+            }
+        }
+        return (paren > 0) + (brace > 0) + (bracket > 0);
+    }
+}
+
 int main() {
     std::cout << "MiniR CLI (v0.1.0)" << std::endl;
     std::cout << "Type 'exit' or 'quit' to leave." << std::endl;
@@ -17,16 +40,25 @@ int main() {
     auto env = std::make_shared<RValue>(RType::ENV);
     Evaluator::InitGlobalEnv(env);
 
+    std::string acc;
+
     while (true) {
-        std::cout << "> ";
+        std::cout << (acc.empty() ? "> " : "+ ");
         std::string line;
         if (!std::getline(std::cin, line)) break;
         if (line == "exit" || line == "quit" || line == "q()") break;
-        if (line.empty()) continue;
+        if (line.empty() && acc.empty()) continue;
 
         try {
+            acc += line;
+            acc += "\n";
+
+            if (BalanceDelims(acc) > 0) {
+                continue; // keep reading lines
+            }
+
             // Lex
-            Lexer lexer(line);
+            Lexer lexer(acc);
             auto tokens = lexer.Tokenize();
             
             // Parse
@@ -39,6 +71,12 @@ int main() {
             // But Parser::Parse usually returns a single expression or a block.
             // Let's assume it returns one RValuePtr.
             
+            if (parser.HasError()) {
+                std::cout << "Error: " << parser.GetError() << std::endl;
+                acc.clear();
+                continue;
+            }
+
             if (ast) {
                 RValuePtr result = Evaluator::Eval(ast, env);
                 
@@ -55,8 +93,10 @@ int main() {
                      }
                 }
             }
+            acc.clear();
         } catch (const std::exception& e) {
             std::cout << "Error: " << e.what() << std::endl;
+            acc.clear();
         }
     }
     return 0;

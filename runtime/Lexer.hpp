@@ -8,12 +8,15 @@ enum class TokenType {
     number,
     string,
     keyword, // if, else, function, while, TRUE, FALSE, NA, NULL
+    invalid, // lexer error / unknown token
     
     // Operators
     eq, ne, lt, le, gt, ge, // == != < <= > >=
     assign, // <- or = (treated same or distinct?)
     plus, minus, star, slash, power, // + - * / ^
     mod, div_int, mat_mult, // %% %/% %*%
+    infix, // user-defined %op% operators
+    bang, amp, pipe, // ! & |
     colon, // :
     dollar, // $
     

@@ -55,9 +55,30 @@ Token Lexer::ScanToken() {
     char c = Current();
     Token t;
     t.line = line;
+    t.type = TokenType::invalid;
     
     // Identifier or Keyword
     if (isalpha(c) || c == '.') {
+        // R allows leading-dot numbers like `.5`
+        if (c == '.' && isdigit(Peek())) {
+            std::string text;
+            text += '.';
+            Advance();
+            while (isdigit(Current()) || Current() == '.') {
+                text += Current();
+                Advance();
+            }
+        t.type = TokenType::number;
+        t.text = text;
+        try {
+            t.num_val = std::stod(text);
+        } catch (...) {
+            // R: malformed numeric literal should be a parse error, not silently NaN.
+            t.type = TokenType::invalid;
+        }
+        return t;
+        }
+
         std::string text;
         while (isalnum(Current()) || Current() == '.' || Current() == '_') {
             text += Current();
@@ -85,7 +106,11 @@ Token Lexer::ScanToken() {
         }
         t.type = TokenType::number;
         t.text = text;
-        t.num_val = std::stod(text);
+        try {
+            t.num_val = std::stod(text);
+        } catch (...) {
+            t.type = TokenType::invalid;
+        }
         return t;
     }
     
@@ -148,8 +173,10 @@ Token Lexer::ScanToken() {
              break;
         case '!':
              if (Current() == '=') { Advance(); t.type = TokenType::ne; t.text = "!="; }
-             // else logical not (todo)
+             else { t.type = TokenType::bang; t.text = "!"; }
              break;
+        case '&': t.type = TokenType::amp; t.text = "&"; break;
+        case '|': t.type = TokenType::pipe; t.text = "|"; break;
         case '%':
              // Special operators %...%
              {
@@ -165,10 +192,17 @@ Token Lexer::ScanToken() {
                      if (op == "%%") t.type = TokenType::mod;
                      else if (op == "%/%") t.type = TokenType::div_int;
                      else if (op == "%*%") t.type = TokenType::mat_mult;
-                     else t.type = TokenType::keyword; // Unknown %op% treat as infix?
+                     else t.type = TokenType::infix; // User-defined %op% infix operator
+                 } else {
+                     // Malformed %op% without a closing '%'
+                     t.type = TokenType::invalid;
+                     t.text = op;
                  }
              }
              break;
+        default:
+            // Keep TokenType::invalid for unknown characters
+            break;
     }
     
     return t;

@@ -61,19 +61,23 @@ int Parser::GetPrecedence(TokenType t) const {
         case TokenType::ge: return PREC_COMPARISON; // R: < > <= >=
         case TokenType::eq:
         case TokenType::ne: return PREC_EQUALITY;
+        case TokenType::pipe: return PREC_OR;
+        case TokenType::amp: return PREC_AND;
         case TokenType::plus:
         case TokenType::minus: return PREC_TERM;
         case TokenType::star:
         case TokenType::slash:
         case TokenType::mod:
         case TokenType::div_int:
-        case TokenType::mat_mult: return PREC_FACTOR;
+        case TokenType::mat_mult:
+        case TokenType::infix: return PREC_FACTOR;
         case TokenType::power: return PREC_EXPONENT;
         case TokenType::colon: return PREC_COLON;
         case TokenType::lparen: 
         case TokenType::lbracket:
         case TokenType::dbl_lbracket:
         case TokenType::dollar: return PREC_CALL;
+        case TokenType::bang: return PREC_NONE; // unary, handled in ParsePrimary
         default: return PREC_NONE;
     }
 }
@@ -148,6 +152,20 @@ RValuePtr Parser::ParseExpression(int precedence) {
 }
 
 RValuePtr Parser::ParsePrimary() {
+    if (Check(TokenType::invalid)) {
+        error_state = true;
+        error_msg = "Invalid token: '" + Current().text + "' at line " + std::to_string(Current().line);
+        return RR_Nil();
+    }
+    if (Match(TokenType::bang)) {
+        RValuePtr rhs = ParseExpression(PREC_AND);
+        auto call = std::make_shared<RValue>(RType::LIST);
+        auto func = std::make_shared<RValue>(RType::SYMBOL);
+        func->sym_name = "!";
+        call->l_vec.push_back(func);
+        call->l_vec.push_back(rhs);
+        return call;
+    }
     if (Match(TokenType::identifier)) {
         Token t = tokens[pos-1];
         auto r = std::make_shared<RValue>(RType::SYMBOL);
@@ -267,8 +285,8 @@ RValuePtr Parser::ParseCall(RValuePtr callee) {
 
     if (!Check(TokenType::rparen)) {
         do {
-            // Named args? name=val
-             if (tokens[pos].type == TokenType::identifier && tokens[pos+1].type == TokenType::eq) {
+            // Named args? name=val (R uses single = for named arguments)
+             if (pos + 1 < (int)tokens.size() && tokens[pos].type == TokenType::identifier && tokens[pos+1].type == TokenType::assign) {
                  Token name = tokens[pos];
                  Advance(); // Eat name
                  Advance(); // Eat =

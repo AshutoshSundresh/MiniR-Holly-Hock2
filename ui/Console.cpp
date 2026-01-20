@@ -1,6 +1,33 @@
 #include "Console.hpp"
 #include <sdk/os/debug.hpp>
 
+namespace {
+    // Very small “is input complete?” heuristic for on-device multiline:
+    // track (), {}, [] balance and ignore anything inside single/double quotes.
+    // This is not a full R parser, but it handles the common { ... } case.
+    int BalanceDelims(const std::string& s) {
+        int paren = 0, brace = 0, bracket = 0;
+        bool in_single = false, in_double = false;
+        for (size_t i = 0; i < s.size(); ++i) {
+            char c = s[i];
+            if (!in_double && c == '\'' ) { in_single = !in_single; continue; }
+            if (!in_single && c == '"'  ) { in_double = !in_double; continue; }
+            if (in_single || in_double) continue;
+            switch (c) {
+                case '(': paren++; break;
+                case ')': paren--; break;
+                case '{': brace++; break;
+                case '}': brace--; break;
+                case '[': bracket++; break;
+                case ']': bracket--; break;
+                default: break;
+            }
+        }
+        // treat any negative as complete (parser will error)
+        return (paren > 0) + (brace > 0) + (bracket > 0);
+    }
+}
+
 void Console::Init() {
     scrollback.clear();
     input_accumulator = "";
@@ -20,22 +47,37 @@ void Console::Backspace() {
 }
 
 void Console::Enter() {
-    // Basic "Enter" just pushes to scrollback for now (until we have runtime)
-    // Real logic: Append to accumulator, check if complete.
-    // For now: push prompt + line to scrollback, clear line.
-    
-    std::string full = prompt + current_line;
-    scrollback.push_back(full);
-    
-    // Push for execution
-    if (!current_line.empty()) {
-        pending_command = current_line;
+    const bool was_at_bottom = (scroll_offset >= (int)scrollback.size() - LINES_PER_SCREEN);
+
+    const char* active_prompt = input_accumulator.empty() ? "> " : "+ ";
+    scrollback.push_back(std::string(active_prompt) + current_line);
+
+    // Enforce MAX_LINES
+    while ((int)scrollback.size() > MAX_LINES) {
+        scrollback.erase(scrollback.begin());
+        if (scroll_offset > 0) scroll_offset--;
     }
-    
-    current_line = "";
-    // Scroll to bottom
-    if ((int)scrollback.size() > LINES_PER_SCREEN) {
-        scroll_offset = scrollback.size() - LINES_PER_SCREEN;
+
+    // Accumulate multi-line input
+    std::string combined = input_accumulator;
+    combined += current_line;
+    combined += "\n";
+
+    if (!current_line.empty() || !input_accumulator.empty()) {
+        if (BalanceDelims(combined) > 0) {
+            input_accumulator = combined;
+            pending_command.clear();
+        } else {
+            pending_command = combined;
+            input_accumulator.clear();
+        }
+    }
+
+    current_line.clear();
+
+    // Auto-follow bottom if we were already there
+    if (was_at_bottom && (int)scrollback.size() > LINES_PER_SCREEN) {
+        scroll_offset = (int)scrollback.size() - LINES_PER_SCREEN;
     }
 }
 
@@ -50,7 +92,15 @@ void Console::Print(const char* str) {
 }
 
 void Console::PrintLine(const char* str) {
+    const bool was_at_bottom = (scroll_offset >= (int)scrollback.size() - LINES_PER_SCREEN);
     scrollback.push_back(str);
+    while ((int)scrollback.size() > MAX_LINES) {
+        scrollback.erase(scrollback.begin());
+        if (scroll_offset > 0) scroll_offset--;
+    }
+    if (was_at_bottom && (int)scrollback.size() > LINES_PER_SCREEN) {
+        scroll_offset = (int)scrollback.size() - LINES_PER_SCREEN;
+    }
 }
 
 void Console::Draw() {
@@ -71,7 +121,8 @@ void Console::Draw() {
     // (Or just below last log)
     // Let's pin it to a fixed row, say row 10
     int input_row = LINES_PER_SCREEN + 2;
-    std::string line_view = prompt + current_line;
+    const char* active_prompt = input_accumulator.empty() ? "> " : "+ ";
+    std::string line_view = std::string(active_prompt) + current_line;
     
     // Blinking cursor simulation? 
     line_view += "_";

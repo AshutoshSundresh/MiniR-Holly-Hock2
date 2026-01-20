@@ -2,6 +2,12 @@
 #include <iostream>
 #include <cmath>
 #include <algorithm>
+#include <random>
+#include <sstream>
+#include <iomanip>
+#include <cstdint>
+#include <cstring>
+#include <limits>
 
 namespace Evaluator {
 
@@ -12,6 +18,75 @@ namespace Evaluator {
             return !v->i_vec.empty() && v->i_vec[0] != 0 && v->i_vec[0] != -1; // -1 is NA?
         }
         return false;
+    }
+
+    // R-style logical scalar encoding: 1=TRUE, 0=FALSE, -1=NA
+    // NA_real_ in R is a specific NaN payload. We'll emulate that so we can
+    // distinguish NA from plain NaN when printing.
+    static inline double NAReal() {
+        // Common R NA_real_ payload (IEEE-754 quiet NaN with specific bits).
+        // This matches R's NA_REAL on typical platforms.
+        const uint64_t bits = 0x7ff00000000007a2ULL;
+        double d;
+        std::memcpy(&d, &bits, sizeof(d));
+        return d;
+    }
+    static inline bool IsNAReal(double d) {
+        if (!std::isnan(d)) return false;
+        uint64_t bits;
+        std::memcpy(&bits, &d, sizeof(bits));
+        return bits == 0x7ff00000000007a2ULL;
+    }
+
+    int AsLogicalAt(RValuePtr v, int i) {
+        if (!v) return 0;
+        if (v->type == RType::LOGICAL) {
+            if (i < 0 || i >= (int)v->i_vec.size()) return 0;
+            return v->i_vec[i];
+        }
+        if (v->type == RType::INTEGER) {
+            if (i < 0 || i >= (int)v->i_vec.size()) return 0;
+            if (v->i_vec[i] == R_INT_NA) return -1;
+            return v->i_vec[i] == 0 ? 0 : 1;
+        }
+        if (v->type == RType::DOUBLE) {
+            if (i < 0 || i >= (int)v->d_vec.size()) return 0;
+            double d = v->d_vec[i];
+            if (std::isnan(d)) return -1; // NA_real_ or NaN -> NA logical
+            return d == 0.0 ? 0 : 1;
+        }
+        // For this MiniR subset, treat other types as FALSE.
+        return 0;
+    }
+
+    bool ConditionToBoolOrError(RValuePtr cond, std::string& err) {
+        if (!cond) { err = "argument is of length zero"; return false; }
+        if (cond->Length() == 0) { err = "argument is of length zero"; return false; }
+        if (cond->Length() != 1) { err = "the condition has length > 1"; return false; }
+        int lv = AsLogicalAt(cond, 0);
+        if (lv == -1) { err = "missing value where TRUE/FALSE needed"; return false; }
+        return lv == 1;
+    }
+
+    void WarnRecycle(const char* op, int lenA, int lenB) {
+        if (lenA == 0 || lenB == 0) return;
+        int N = std::max(lenA, lenB);
+        if ((lenA != 0 && N % lenA != 0) || (lenB != 0 && N % lenB != 0)) {
+            std::cerr << "Warning: longer object length is not a multiple of shorter object length in '" << op << "'\n";
+        }
+    }
+
+    bool AnyDouble(RValuePtr a, RValuePtr b) {
+        return (a && a->type == RType::DOUBLE) || (b && b->type == RType::DOUBLE);
+    }
+
+    bool IsIntLike(RValuePtr v) {
+        return v && (v->type == RType::INTEGER || v->type == RType::LOGICAL);
+    }
+
+    int32_t IntOpResultOrNA(int64_t x) {
+        if (x < (int64_t)INT32_MIN || x > (int64_t)INT32_MAX) return R_INT_NA;
+        return (int32_t)x;
     }
 
     RValuePtr Lookup(const std::string& name, RValuePtr env) {
@@ -62,15 +137,52 @@ namespace Evaluator {
     }
     
     RValuePtr Builtin_C(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
-        // Combine. Flatten?
-        // Simple double implementation
-        auto res = std::make_shared<RValue>(RType::DOUBLE);
-        for(auto& arg : args) {
-            if (arg->type == RType::DOUBLE) {
-                res->d_vec.insert(res->d_vec.end(), arg->d_vec.begin(), arg->d_vec.end());
-            } else if (arg->type == RType::INTEGER || arg->type == RType::LOGICAL) {
-                for(int v : arg->i_vec) res->d_vec.push_back((double)v);
+        // Combine with R-like coercion priority: character > double > integer > logical
+        bool has_char = false, has_double = false, has_int = false, has_lgl = false;
+        for (auto& arg : args) {
+            has_char |= (arg->type == RType::CHARACTER);
+            has_double |= (arg->type == RType::DOUBLE);
+            has_int |= (arg->type == RType::INTEGER);
+            has_lgl |= (arg->type == RType::LOGICAL);
+        }
+
+        if (has_char) {
+            auto res = std::make_shared<RValue>(RType::CHARACTER);
+            for (auto& arg : args) {
+                if (arg->type == RType::CHARACTER) {
+                    res->s_vec.insert(res->s_vec.end(), arg->s_vec.begin(), arg->s_vec.end());
+                } else if (arg->type == RType::DOUBLE || arg->type == RType::INTEGER || arg->type == RType::LOGICAL) {
+                    for (int i = 0; i < arg->Length(); ++i) res->s_vec.push_back(std::to_string(arg->GetDouble(i)));
+                }
             }
+            return res;
+        }
+
+        if (has_double) {
+            auto res = std::make_shared<RValue>(RType::DOUBLE);
+            for (auto& arg : args) {
+                if (arg->type == RType::DOUBLE) {
+                    res->d_vec.insert(res->d_vec.end(), arg->d_vec.begin(), arg->d_vec.end());
+                } else if (arg->type == RType::INTEGER || arg->type == RType::LOGICAL) {
+                    for (int i = 0; i < arg->Length(); ++i) res->d_vec.push_back(arg->GetDouble(i));
+                }
+            }
+            return res;
+        }
+
+        if (has_int) {
+            auto res = std::make_shared<RValue>(RType::INTEGER);
+            for (auto& arg : args) {
+                if (arg->type == RType::INTEGER) res->i_vec.insert(res->i_vec.end(), arg->i_vec.begin(), arg->i_vec.end());
+                else if (arg->type == RType::LOGICAL) res->i_vec.insert(res->i_vec.end(), arg->i_vec.begin(), arg->i_vec.end());
+            }
+            return res;
+        }
+
+        // logical-only
+        auto res = std::make_shared<RValue>(RType::LOGICAL);
+        for (auto& arg : args) {
+            if (arg->type == RType::LOGICAL) res->i_vec.insert(res->i_vec.end(), arg->i_vec.begin(), arg->i_vec.end());
         }
         return res;
     }
@@ -79,15 +191,30 @@ namespace Evaluator {
         if (args.size() < 2) return RR_Error("Need 2 args for +");
         int lenA = args[0]->Length();
         int lenB = args[1]->Length();
+        if (lenA == 0 || lenB == 0) {
+            return AnyDouble(args[0], args[1]) ? std::make_shared<RValue>(RType::DOUBLE) : std::make_shared<RValue>(RType::INTEGER);
+        }
+        WarnRecycle("+", lenA, lenB);
         int N = std::max(lenA, lenB);
-        
-        auto res = std::make_shared<RValue>(RType::DOUBLE);
-        res->d_vec.resize(N);
-        
-        for(int i=0; i<N; ++i) {
-            double a = (lenA > 0) ? args[0]->GetDouble(i % lenA) : 0;
-            double b = (lenB > 0) ? args[1]->GetDouble(i % lenB) : 0;
-            res->d_vec[i] = a + b;
+
+        // Type promotion: if either is DOUBLE => DOUBLE else INTEGER
+        if (AnyDouble(args[0], args[1])) {
+            auto res = std::make_shared<RValue>(RType::DOUBLE);
+            res->d_vec.resize(N);
+            for (int i = 0; i < N; ++i) {
+                double a = args[0]->GetDouble(i % lenA);
+                double b = args[1]->GetDouble(i % lenB);
+                res->d_vec[i] = a + b;
+            }
+            return res;
+        }
+        auto res = std::make_shared<RValue>(RType::INTEGER);
+        res->i_vec.resize(N);
+        for (int i = 0; i < N; ++i) {
+            int a = args[0]->GetInt(i % lenA);
+            int b = args[1]->GetInt(i % lenB);
+            if (a == R_INT_NA || b == R_INT_NA) res->i_vec[i] = R_INT_NA;
+            else res->i_vec[i] = IntOpResultOrNA((int64_t)a + (int64_t)b);
         }
         return res;
     }
@@ -96,13 +223,28 @@ namespace Evaluator {
          if (args.size() < 2) return RR_Error("Need 2 args for -");
          int lenA = args[0]->Length();
          int lenB = args[1]->Length();
+         if (lenA == 0 || lenB == 0) {
+             return AnyDouble(args[0], args[1]) ? std::make_shared<RValue>(RType::DOUBLE) : std::make_shared<RValue>(RType::INTEGER);
+         }
+         WarnRecycle("-", lenA, lenB);
          int N = std::max(lenA, lenB);
-         auto res = std::make_shared<RValue>(RType::DOUBLE);
-         res->d_vec.resize(N);
-         for(int i=0; i<N; ++i) {
-             double a = lenA ? args[0]->GetDouble(i % lenA) : 0;
-             double b = lenB ? args[1]->GetDouble(i % lenB) : 0;
-             res->d_vec[i] = a - b;
+         if (AnyDouble(args[0], args[1])) {
+             auto res = std::make_shared<RValue>(RType::DOUBLE);
+             res->d_vec.resize(N);
+             for (int i = 0; i < N; ++i) {
+                 double a = args[0]->GetDouble(i % lenA);
+                 double b = args[1]->GetDouble(i % lenB);
+                 res->d_vec[i] = a - b;
+             }
+             return res;
+         }
+         auto res = std::make_shared<RValue>(RType::INTEGER);
+         res->i_vec.resize(N);
+         for (int i = 0; i < N; ++i) {
+             int a = args[0]->GetInt(i % lenA);
+             int b = args[1]->GetInt(i % lenB);
+             if (a == R_INT_NA || b == R_INT_NA) res->i_vec[i] = R_INT_NA;
+             else res->i_vec[i] = IntOpResultOrNA((int64_t)a - (int64_t)b);
          }
          return res;
     }
@@ -111,15 +253,127 @@ namespace Evaluator {
          if (args.size() < 2) return RR_Error("Need 2 args for *");
          int lenA = args[0]->Length();
          int lenB = args[1]->Length();
+         if (lenA == 0 || lenB == 0) {
+             return AnyDouble(args[0], args[1]) ? std::make_shared<RValue>(RType::DOUBLE) : std::make_shared<RValue>(RType::INTEGER);
+         }
+         WarnRecycle("*", lenA, lenB);
          int N = std::max(lenA, lenB);
-         auto res = std::make_shared<RValue>(RType::DOUBLE);
-         res->d_vec.resize(N);
-         for(int i=0; i<N; ++i) {
-             double a = lenA ? args[0]->GetDouble(i % lenA) : 0;
-             double b = lenB ? args[1]->GetDouble(i % lenB) : 0;
-             res->d_vec[i] = a * b;
+         if (AnyDouble(args[0], args[1])) {
+             auto res = std::make_shared<RValue>(RType::DOUBLE);
+             res->d_vec.resize(N);
+             for (int i = 0; i < N; ++i) {
+                 double a = args[0]->GetDouble(i % lenA);
+                 double b = args[1]->GetDouble(i % lenB);
+                 res->d_vec[i] = a * b;
+             }
+             return res;
+         }
+         auto res = std::make_shared<RValue>(RType::INTEGER);
+         res->i_vec.resize(N);
+         for (int i = 0; i < N; ++i) {
+             int a = args[0]->GetInt(i % lenA);
+             int b = args[1]->GetInt(i % lenB);
+             if (a == R_INT_NA || b == R_INT_NA) res->i_vec[i] = R_INT_NA;
+             else res->i_vec[i] = IntOpResultOrNA((int64_t)a * (int64_t)b);
          }
          return res;
+    }
+
+    RValuePtr Builtin_Div(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+        if (args.size() < 2) return RR_Error("Need 2 args for /");
+        int lenA = args[0]->Length();
+        int lenB = args[1]->Length();
+        if (lenA == 0 || lenB == 0) return std::make_shared<RValue>(RType::DOUBLE);
+        WarnRecycle("/", lenA, lenB);
+        int N = std::max(lenA, lenB);
+        auto res = std::make_shared<RValue>(RType::DOUBLE);
+        res->d_vec.resize(N);
+        for (int i = 0; i < N; ++i) {
+            double a = args[0]->GetDouble(i % lenA);
+            double b = args[1]->GetDouble(i % lenB);
+            res->d_vec[i] = a / b;
+        }
+        return res;
+    }
+
+    RValuePtr Builtin_Pow(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+        if (args.size() < 2) return RR_Error("Need 2 args for ^");
+        int lenA = args[0]->Length();
+        int lenB = args[1]->Length();
+        if (lenA == 0 || lenB == 0) return std::make_shared<RValue>(RType::DOUBLE);
+        WarnRecycle("^", lenA, lenB);
+        int N = std::max(lenA, lenB);
+        auto res = std::make_shared<RValue>(RType::DOUBLE);
+        res->d_vec.resize(N);
+        for (int i = 0; i < N; ++i) {
+            double a = args[0]->GetDouble(i % lenA);
+            double b = args[1]->GetDouble(i % lenB);
+            res->d_vec[i] = std::pow(a, b);
+        }
+        return res;
+    }
+
+    RValuePtr Builtin_Mod(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+        if (args.size() < 2) return RR_Error("Need 2 args for %%");
+        int lenA = args[0]->Length();
+        int lenB = args[1]->Length();
+        if (lenA == 0 || lenB == 0) {
+            return (AnyDouble(args[0], args[1]) ? std::make_shared<RValue>(RType::DOUBLE) : std::make_shared<RValue>(RType::INTEGER));
+        }
+        WarnRecycle("%%", lenA, lenB);
+        int N = std::max(lenA, lenB);
+        // If both are int-like, return INTEGER like R does for 5L %% 2L
+        if (!AnyDouble(args[0], args[1]) && IsIntLike(args[0]) && IsIntLike(args[1])) {
+            auto res = std::make_shared<RValue>(RType::INTEGER);
+            res->i_vec.resize(N);
+            for (int i = 0; i < N; ++i) {
+                int a = args[0]->GetInt(i % lenA);
+                int b = args[1]->GetInt(i % lenB);
+                if (a == R_INT_NA || b == R_INT_NA) res->i_vec[i] = R_INT_NA;
+                else if (b == 0) res->i_vec[i] = R_INT_NA;
+                else res->i_vec[i] = a % b;
+            }
+            return res;
+        }
+        auto res = std::make_shared<RValue>(RType::DOUBLE);
+        res->d_vec.resize(N);
+        for (int i = 0; i < N; ++i) {
+            double a = args[0]->GetDouble(i % lenA);
+            double b = args[1]->GetDouble(i % lenB);
+            res->d_vec[i] = std::fmod(a, b);
+        }
+        return res;
+    }
+
+    RValuePtr Builtin_IntDiv(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+        if (args.size() < 2) return RR_Error("Need 2 args for %/%");
+        int lenA = args[0]->Length();
+        int lenB = args[1]->Length();
+        if (lenA == 0 || lenB == 0) {
+            return (AnyDouble(args[0], args[1]) ? std::make_shared<RValue>(RType::DOUBLE) : std::make_shared<RValue>(RType::INTEGER));
+        }
+        WarnRecycle("%/%", lenA, lenB);
+        int N = std::max(lenA, lenB);
+        if (!AnyDouble(args[0], args[1]) && IsIntLike(args[0]) && IsIntLike(args[1])) {
+            auto res = std::make_shared<RValue>(RType::INTEGER);
+            res->i_vec.resize(N);
+            for (int i = 0; i < N; ++i) {
+                int a = args[0]->GetInt(i % lenA);
+                int b = args[1]->GetInt(i % lenB);
+                if (a == R_INT_NA || b == R_INT_NA) res->i_vec[i] = R_INT_NA;
+                else if (b == 0) res->i_vec[i] = R_INT_NA;
+                else res->i_vec[i] = (int)std::floor((double)a / (double)b);
+            }
+            return res;
+        }
+        auto res = std::make_shared<RValue>(RType::DOUBLE);
+        res->d_vec.resize(N);
+        for (int i = 0; i < N; ++i) {
+            double a = args[0]->GetDouble(i % lenA);
+            double b = args[1]->GetDouble(i % lenB);
+            res->d_vec[i] = std::floor(a / b);
+        }
+        return res;
     }
     
     // --- STANDARD MATH ---
@@ -144,7 +398,8 @@ namespace Evaluator {
         auto res = std::make_shared<RValue>(RType::DOUBLE);
         for(int i=0; i<x->Length(); ++i) {
             double v = x->GetDouble(i);
-            res->d_vec.push_back(v < 0 ? 0.0/0.0 : std::sqrt(v)); // NaN if neg
+            // R: sqrt(negative) -> NaN with warning (we don't implement warnings yet)
+            res->d_vec.push_back(v < 0 ? std::numeric_limits<double>::quiet_NaN() : std::sqrt(v));
         }
         return res;
     }
@@ -178,13 +433,15 @@ namespace Evaluator {
           int lenB = args[1]->Length();
           int N = std::max(lenA, lenB);
           auto res = std::make_shared<RValue>(RType::LOGICAL);
-          for(int i=0; i<N; ++i) {
-              double a = lenA ? args[0]->GetDouble(i % lenA) : 0;
-              double b = lenB ? args[1]->GetDouble(i % lenB) : 0;
-              // NA logic? 1=TRUE, 0=FALSE, -1=NA
-              // R: NA & TRUE -> NA, NA & FALSE -> FALSE
-              // For now, simple bool
-              res->i_vec.push_back((a!=0 && b!=0) ? 1 : 0);
+          for (int i = 0; i < N; ++i) {
+              int a = lenA ? AsLogicalAt(args[0], i % lenA) : 0;
+              int b = lenB ? AsLogicalAt(args[1], i % lenB) : 0;
+              // R rules: FALSE & NA -> FALSE; TRUE & NA -> NA; NA & NA -> NA
+              int out;
+              if (a == 0 || b == 0) out = 0;
+              else if (a == -1 || b == -1) out = -1;
+              else out = 1;
+              res->i_vec.push_back(out);
           }
           return res;
     }
@@ -194,12 +451,28 @@ namespace Evaluator {
           int lenB = args[1]->Length();
           int N = std::max(lenA, lenB);
           auto res = std::make_shared<RValue>(RType::LOGICAL);
-          for(int i=0; i<N; ++i) {
-              double a = lenA ? args[0]->GetDouble(i % lenA) : 0;
-              double b = lenB ? args[1]->GetDouble(i % lenB) : 0;
-              res->i_vec.push_back((a!=0 || b!=0) ? 1 : 0);
+          for (int i = 0; i < N; ++i) {
+              int a = lenA ? AsLogicalAt(args[0], i % lenA) : 0;
+              int b = lenB ? AsLogicalAt(args[1], i % lenB) : 0;
+              // R rules: TRUE | NA -> TRUE; FALSE | NA -> NA; NA | NA -> NA
+              int out;
+              if (a == 1 || b == 1) out = 1;
+              else if (a == -1 || b == -1) out = -1;
+              else out = 0;
+              res->i_vec.push_back(out);
           }
           return res;
+    }
+
+    RValuePtr Builtin_Not(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+        if (args.empty()) return RR_Error("Need 1 arg for !");
+        RValuePtr x = args[0];
+        auto res = std::make_shared<RValue>(RType::LOGICAL);
+        for (int i = 0; i < x->Length(); ++i) {
+            int v = AsLogicalAt(x, i);
+            res->i_vec.push_back(v == -1 ? -1 : (v == 1 ? 0 : 1));
+        }
+        return res;
     }
     // --- CLOSURE CALL HELPER ---
     // We need to expose a way for BUILTINS (like lapply) to call functions (closures/builtins)
@@ -229,9 +502,10 @@ namespace Evaluator {
         RValuePtr FUN = args[1];
         
         // FUN might be symbol -> lookup
-        if (FUN->type == RType::SYMBOL) FUN = Lookup(FUN->sym_name, env); // Attempt lookup
-        // If lookup fails or returns error...
-        // Assuming FUN is passed as object or symbol.
+        if (FUN->type == RType::SYMBOL) {
+            FUN = Lookup(FUN->sym_name, env);
+            if (FUN->type == RType::ERROR) return FUN;
+        }
         
         auto res = std::make_shared<RValue>(RType::LIST);
         int n = X->Length();
@@ -272,10 +546,11 @@ namespace Evaluator {
          }
          
          auto res = std::make_shared<RValue>(common);
-         for(auto& v : l->l_vec) {
+         for (auto& v : l->l_vec) {
              if (common == RType::DOUBLE) res->d_vec.push_back(v->d_vec[0]);
-             if (common == RType::INTEGER) res->i_vec.push_back(v->i_vec[0]);
-             if (common == RType::CHARACTER) res->s_vec.push_back(v->s_vec[0]);
+             else if (common == RType::INTEGER) res->i_vec.push_back(v->i_vec[0]);
+             else if (common == RType::LOGICAL) res->i_vec.push_back(v->i_vec[0]);
+             else if (common == RType::CHARACTER) res->s_vec.push_back(v->s_vec[0]);
          }
          return res;
     }
@@ -1019,8 +1294,11 @@ namespace Evaluator {
         // Fill Column Major (default)
         // Todo: support byrow
         int dlen = data->Length();
-        for(int i=0; i<total; ++i) {
-             res->d_vec[i] = data->GetDouble(i % dlen); // Recycle
+        if (dlen == 0) {
+            for (int i = 0; i < total; ++i) res->d_vec[i] = NAReal(); // NA_real_
+        } else {
+            for (int i = 0; i < total; ++i)
+                res->d_vec[i] = data->GetDouble(i % dlen); // Recycle
         }
         
         // Set Dim Attribute
@@ -1174,7 +1452,7 @@ namespace Evaluator {
         if(args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         auto res = std::make_shared<RValue>(RType::LOGICAL);
-        for(int i=0; i<x->Length(); ++i) res->i_vec.push_back(x->GetDouble(i) != 0 ? 1 : 0);
+        for (int i = 0; i < x->Length(); ++i) res->i_vec.push_back(AsLogicalAt(x, i));
         return res;
     }
     
@@ -1215,12 +1493,16 @@ namespace Evaluator {
         RValuePtr x = args[0];
         auto res = std::make_shared<RValue>(RType::LOGICAL);
         for(int i=0; i<x->Length(); ++i) {
-            // Check NA (simplified)
-             bool is_na = false;
-             if (x->type == RType::INTEGER || x->type == RType::LOGICAL) {
-                 if (x->i_vec[i] == -1) is_na = true;
-             }
-             res->i_vec.push_back(is_na ? 1 : 0);
+            bool is_na = false;
+            if (x->type == RType::DOUBLE) {
+                // R: is.na() is TRUE for NA_real_ and also for NaN
+                is_na = std::isnan(x->d_vec[i]);
+            } else if (x->type == RType::INTEGER) {
+                is_na = (x->i_vec[i] == R_INT_NA);
+            } else if (x->type == RType::LOGICAL) {
+                is_na = (x->i_vec[i] == -1);
+            }
+            res->i_vec.push_back(is_na ? 1 : 0);
         }
         return res;
     }
@@ -1560,6 +1842,8 @@ namespace Evaluator {
         res->attributes["dim"] = dim;
         return res;
     }
+
+    RValuePtr Builtin_PMax(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
         if (args.empty()) return RR_Nil();
         auto res = std::make_shared<RValue>(RType::DOUBLE);
         
@@ -1599,6 +1883,9 @@ namespace Evaluator {
         }
         return res;
     }
+
+    RValuePtr Builtin_Summary(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env, int op) {
+        RValuePtr narm_arg = GetArg(args, names, "na.rm", (int)args.size() - 1, nullptr);
         bool na_rm = narm_arg ? IsTrue(narm_arg) : false;
         
         double sum = 0;
@@ -1657,17 +1944,15 @@ namespace Evaluator {
     RValuePtr Builtin_All(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) { return Builtin_Summary(args, names, env, 4); }
     
     RValuePtr Builtin_Mean(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
-        // Sum / Count
-        // Use Sum logic but track count
-        // Dry run:
+        if (args.empty()) return RR_Nil();
         RValuePtr s = Builtin_Sum(args, names, env);
-        // How to get count? Recalculate or custom mean impl.
-        // Custom impl for Mean:
+        if (s->type == RType::ERROR) return s;
         double sum = s->GetDouble(0);
         int count = 0;
-         for(auto& arg : args) count += arg->Length(); // Approx (includes na.rm logic?)
-         // Fix: Proper count needed.
-         return s; // Placeholder
+        for (auto& arg : args) count += arg->Length();
+        auto res = std::make_shared<RValue>(RType::DOUBLE);
+        res->d_vec.push_back(count > 0 ? sum / count : 0.0/0.0);
+        return res;
     }
 
     void InitGlobalEnv(RValuePtr env) {
@@ -1829,7 +2114,10 @@ namespace Evaluator {
                     if (head->sym_name == "if") {
                         // (if cond then else)
                         RValuePtr cond = Eval(exp->l_vec[1], env);
-                        if (IsTrue(cond)) return Eval(exp->l_vec[2], env);
+                        std::string cerr;
+                        bool c = ConditionToBoolOrError(cond, cerr);
+                        if (!cerr.empty()) return RR_Error(cerr);
+                        if (c) return Eval(exp->l_vec[2], env);
                         if (exp->l_vec.size() > 3) return Eval(exp->l_vec[3], env);
                         return RR_Nil();
                     }
@@ -1840,7 +2128,10 @@ namespace Evaluator {
                         RValuePtr last = RR_Nil();
                         while(true) {
                             RValuePtr cond = Eval(cond_expr, env);
-                            if (!IsTrue(cond)) break;
+                            std::string cerr;
+                            bool c = ConditionToBoolOrError(cond, cerr);
+                            if (!cerr.empty()) return RR_Error(cerr);
+                            if (!c) break;
                             last = Eval(body, env);
                         }
                         return last;
@@ -1920,24 +2211,13 @@ namespace Evaluator {
                     auto new_env = std::make_shared<RValue>(RType::ENV);
                     new_env->parent_env = func->env; // Lexical scoping
                     
-                    // Bind Arguments
-                    // Simple positional binding for now. TODO: Named args + defaults
-                    RValuePtr formals = func->formals; 
-                    // formals is a list? Or pairlist? Let's assume list of symbols for now, or pairlist with defaults.
-                    // The parser produces a LIST for formals.
-                    
-                    for(size_t i=0; i<formals->l_vec.size(); ++i) {
+                    // Bind Arguments (named + positional via GetArg)
+                    RValuePtr formals = func->formals;
+                    for (size_t i = 0; i < formals->l_vec.size(); ++i) {
                         RValuePtr sym = formals->l_vec[i];
                         std::string name = sym->sym_name;
-                        // Check if we have a default value?
-                        // If formals is (x=1, y=2), then sym is... wait parser might be complex.
-                        // Assume simple (x, y) for now.
-                        if (i < args.size()) {
-                            Define(name, args[i], new_env);
-                        } else {
-                             // Default? Or Error?
-                             Define(name, RR_Nil(), new_env); 
-                        }
+                        RValuePtr val = GetArg(args, arg_names, name, (int)i, RR_Nil());
+                        Define(name, val, new_env);
                     }
                     
                     // Eval Body
@@ -1958,6 +2238,24 @@ namespace Evaluator {
         if (v->type == RType::NIL) return "NULL";
         if (v->type == RType::ERROR) return "Error: " + v->sym_name;
         
+        auto fmtDouble = [](double d) -> std::string {
+            if (IsNAReal(d)) return "NA";
+            if (std::isnan(d)) return "NaN";
+            if (std::isinf(d)) return d > 0 ? "Inf" : "-Inf";
+            std::ostringstream oss;
+            oss.setf(std::ios::fmtflags(0), std::ios::floatfield);
+            oss << std::setprecision(7) << d;
+            return oss.str();
+        };
+        auto fmtInt = [](int x) -> std::string {
+            if (x == R_INT_NA) return "NA";
+            return std::to_string(x);
+        };
+        auto fmtLgl = [](int x) -> std::string {
+            if (x == -1) return "NA";
+            return x ? "TRUE" : "FALSE";
+        };
+
         std::string s = "";
         
         // Prefix with [1] if vector?
@@ -1966,9 +2264,9 @@ namespace Evaluator {
              s += "[1] ";
              for(int i=0; i<v->Length(); ++i) {
                  if (i > 0) s += " ";
-                 if (v->type == RType::DOUBLE) s += std::to_string(v->d_vec[i]);
-                 else if (v->type == RType::INTEGER) s += std::to_string(v->i_vec[i]);
-                 else if (v->type == RType::LOGICAL) s += (v->i_vec[i] ? "TRUE" : "FALSE");
+                 if (v->type == RType::DOUBLE) s += fmtDouble(v->d_vec[i]);
+                 else if (v->type == RType::INTEGER) s += fmtInt(v->i_vec[i]);
+                 else if (v->type == RType::LOGICAL) s += fmtLgl(v->i_vec[i]);
                  else if (v->type == RType::CHARACTER) s += "\"" + v->s_vec[i] + "\"";
              }
              return s;
