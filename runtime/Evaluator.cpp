@@ -1461,10 +1461,24 @@ namespace Evaluator {
         RValuePtr x = args[0];
         auto res = std::make_shared<RValue>(RType::CHARACTER);
         for(int i=0; i<x->Length(); ++i) {
-             // Simple to_string
-             if (x->type == RType::DOUBLE) res->s_vec.push_back(std::to_string(x->d_vec[i]));
-             else if (x->type == RType::INTEGER) res->s_vec.push_back(std::to_string(x->i_vec[i]));
-             else if (x->type == RType::LOGICAL) res->s_vec.push_back(x->i_vec[i] == 1 ? "TRUE" : "FALSE");
+             if (x->type == RType::DOUBLE) {
+                 double d = x->d_vec[i];
+                 if (IsNAReal(d)) res->s_vec.push_back("NA");
+                 else if (std::isnan(d)) res->s_vec.push_back("NaN");
+                 else if (std::isinf(d)) res->s_vec.push_back(d > 0 ? "Inf" : "-Inf");
+                 else {
+                     std::ostringstream oss;
+                     oss.setf(std::ios::fmtflags(0), std::ios::floatfield);
+                     oss << std::setprecision(7) << d;
+                     res->s_vec.push_back(oss.str());
+                 }
+             } else if (x->type == RType::INTEGER) {
+                 if (x->i_vec[i] == R_INT_NA) res->s_vec.push_back("NA");
+                 else res->s_vec.push_back(std::to_string(x->i_vec[i]));
+             } else if (x->type == RType::LOGICAL) {
+                 if (x->i_vec[i] == -1) res->s_vec.push_back("NA");
+                 else res->s_vec.push_back(x->i_vec[i] ? "TRUE" : "FALSE");
+             }
              else if (x->type == RType::CHARACTER) res->s_vec.push_back(x->s_vec[i]);
         }
         return res;
@@ -1517,8 +1531,8 @@ namespace Evaluator {
         
         auto res = std::make_shared<RValue>(RType::INTEGER);
         for(int i=0; i<x->Length(); ++i) {
-            double d = x->GetDouble(i);
-            if (d != 0) { // TRUE
+            int lv = AsLogicalAt(x, i);
+            if (lv == 1) { // TRUE; NA treated as FALSE, like R
                  res->i_vec.push_back(i + 1); // 1-based
             }
         }
