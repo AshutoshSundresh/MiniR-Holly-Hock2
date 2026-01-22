@@ -3,6 +3,8 @@
 #include <string>
 #include <memory>
 #include <map>
+#include <cmath>
+#include <limits>
 
 enum class RType {
     NIL,
@@ -61,16 +63,24 @@ struct RValue {
     }
     
     double GetDouble(int i) const {
-        if (i < 0 || i >= Length()) return 0.0; // Todo: NA?
+        if (i < 0 || i >= Length()) return std::numeric_limits<double>::quiet_NaN();
         if (type == RType::DOUBLE) return d_vec[i];
-        if (type == RType::INTEGER || type == RType::LOGICAL) return (double)i_vec[i];
+        if (type == RType::INTEGER || type == RType::LOGICAL) {
+            int v = i_vec[i];
+            if (v == R_INT_NA || v == R_LOGICAL_NA) return std::numeric_limits<double>::quiet_NaN();
+            return (double)v;
+        }
         return 0.0;
     }
 
     int GetInt(int i) const {
-         if (i < 0 || i >= Length()) return 0;
+         if (i < 0 || i >= Length()) return R_INT_NA;
          if (type == RType::INTEGER || type == RType::LOGICAL) return i_vec[i];
-         if (type == RType::DOUBLE) return (int)d_vec[i];
+         if (type == RType::DOUBLE) {
+             double d = d_vec[i];
+             if (std::isnan(d)) return R_INT_NA;
+             return (int)d;
+         }
          return 0;
     }
     

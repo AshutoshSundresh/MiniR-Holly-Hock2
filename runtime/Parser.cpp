@@ -195,6 +195,9 @@ RValuePtr Parser::ParsePrimary() {
         if (t.text == "NA") {
              auto r = std::make_shared<RValue>(RType::LOGICAL); r->i_vec.push_back(-1); return r;
         }
+        if (t.text == "NULL") {
+             return RR_Nil();
+        }
         if (t.text == "function") {
              Consume(TokenType::lparen, "Expect '(' after function");
              // Parse Formals (simplified: just list of symbols)
@@ -206,7 +209,7 @@ RValuePtr Parser::ParsePrimary() {
                      sym->sym_name = arg.text;
                      formals->l_vec.push_back(sym);
                      // Default values? todo
-                     if (Check(TokenType::assign) || Check(TokenType::eq)) {
+                     if (Check(TokenType::assign)) {
                          Advance();
                          ParseExpression(); // Ignore default value for now in AST or store it?
                      }
@@ -241,6 +244,35 @@ RValuePtr Parser::ParsePrimary() {
             call->l_vec.push_back(cond);
             call->l_vec.push_back(then_branch);
             if(else_branch) call->l_vec.push_back(else_branch);
+            return call;
+        }
+        if (t.text == "while") {
+            Consume(TokenType::lparen, "Expect '(' after while");
+            RValuePtr cond = ParseExpression();
+            Consume(TokenType::rparen, "Expect ')'");
+            RValuePtr body = ParseExpression();
+            auto call = std::make_shared<RValue>(RType::LIST);
+            auto func = std::make_shared<RValue>(RType::SYMBOL); func->sym_name = "while";
+            call->l_vec.push_back(func);
+            call->l_vec.push_back(cond);
+            call->l_vec.push_back(body);
+            return call;
+        }
+        if (t.text == "for") {
+            Consume(TokenType::lparen, "Expect '(' after for");
+            Token var_tok = Consume(TokenType::identifier, "Expect variable name in for");
+            Consume(TokenType::comma, "Expect ',' in for");
+            RValuePtr seq_expr = ParseExpression();
+            Consume(TokenType::rparen, "Expect ')'");
+            RValuePtr body = ParseExpression();
+            auto var_sym = std::make_shared<RValue>(RType::SYMBOL);
+            var_sym->sym_name = var_tok.text;
+            auto call = std::make_shared<RValue>(RType::LIST);
+            auto func = std::make_shared<RValue>(RType::SYMBOL); func->sym_name = "for";
+            call->l_vec.push_back(func);
+            call->l_vec.push_back(var_sym);
+            call->l_vec.push_back(seq_expr);
+            call->l_vec.push_back(body);
             return call;
         }
     }

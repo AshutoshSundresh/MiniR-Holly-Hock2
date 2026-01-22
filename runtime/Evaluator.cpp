@@ -1433,8 +1433,6 @@ namespace Evaluator {
     RValuePtr Builtin_NRow(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
          if (args.empty()) return RR_Nil();
          if (args[0]->attributes.count("dim")) {
-             return std::make_shared<RValue>(RType::INTEGER)->i_vec = {args[0]->attributes["dim"]->GetInt(0)}, RR_Nil(); 
-             // Typo fix: return new int RValue
              auto r = std::make_shared<RValue>(RType::INTEGER);
              r->i_vec.push_back(args[0]->attributes["dim"]->GetInt(0));
              return r;
@@ -2151,24 +2149,18 @@ namespace Evaluator {
                         return last;
                     }
                     if (head->sym_name == "for") {
-                        // (for var seq body)
-                        // exp->l_vec[1] is symbol (var)
                         RValuePtr seq_expr = exp->l_vec[2];
                         RValuePtr body = exp->l_vec[3];
-                        
                         RValuePtr seq = Eval(seq_expr, env);
+                        if (seq->type == RType::ERROR) return seq;
                         std::string var_name = exp->l_vec[1]->sym_name;
-                        
                         RValuePtr last = RR_Nil();
                         int n = seq->Length();
                         for(int i=0; i<n; ++i) {
-                            // Create loop variable
                             auto val = std::make_shared<RValue>(seq->type);
-                            // Extract single element
-                            if (seq->type == RType::INTEGER) val->i_vec.push_back(seq->i_vec[i]);
+                            if (seq->type == RType::INTEGER || seq->type == RType::LOGICAL) val->i_vec.push_back(seq->i_vec[i]);
                             else if (seq->type == RType::DOUBLE) val->d_vec.push_back(seq->d_vec[i]);
                             else if (seq->type == RType::CHARACTER) val->s_vec.push_back(seq->s_vec[i]);
-                            
                             Define(var_name, val, env);
                             last = Eval(body, env);
                         }
