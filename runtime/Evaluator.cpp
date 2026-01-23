@@ -15,7 +15,7 @@ namespace Evaluator {
     bool IsTrue(RValuePtr v) {
         if (!v) return false;
         if (v->type == RType::LOGICAL || v->type == RType::INTEGER) {
-            return !v->i_vec.empty() && v->i_vec[0] != 0 && v->i_vec[0] != -1; // -1 is NA?
+            return !v->i_vec.empty() && v->i_vec[0] != 0 && v->i_vec[0] != R_LOGICAL_NA;
         }
         return false;
     }
@@ -46,13 +46,13 @@ namespace Evaluator {
         }
         if (v->type == RType::INTEGER) {
             if (i < 0 || i >= (int)v->i_vec.size()) return 0;
-            if (v->i_vec[i] == R_INT_NA) return -1;
+            if (v->i_vec[i] == R_INT_NA) return R_LOGICAL_NA;
             return v->i_vec[i] == 0 ? 0 : 1;
         }
         if (v->type == RType::DOUBLE) {
             if (i < 0 || i >= (int)v->d_vec.size()) return 0;
             double d = v->d_vec[i];
-            if (std::isnan(d)) return -1; // NA_real_ or NaN -> NA logical
+            if (std::isnan(d)) return R_LOGICAL_NA;
             return d == 0.0 ? 0 : 1;
         }
         // For this MiniR subset, treat other types as FALSE.
@@ -64,7 +64,7 @@ namespace Evaluator {
         if (cond->Length() == 0) { err = "argument is of length zero"; return false; }
         if (cond->Length() != 1) { err = "the condition has length > 1"; return false; }
         int lv = AsLogicalAt(cond, 0);
-        if (lv == -1) { err = "missing value where TRUE/FALSE needed"; return false; }
+        if (lv == R_LOGICAL_NA) { err = "missing value where TRUE/FALSE needed"; return false; }
         return lv == 1;
     }
 
@@ -439,7 +439,7 @@ namespace Evaluator {
               // R rules: FALSE & NA -> FALSE; TRUE & NA -> NA; NA & NA -> NA
               int out;
               if (a == 0 || b == 0) out = 0;
-              else if (a == -1 || b == -1) out = -1;
+              else if (a == R_LOGICAL_NA || b == R_LOGICAL_NA) out = R_LOGICAL_NA;
               else out = 1;
               res->i_vec.push_back(out);
           }
@@ -457,7 +457,7 @@ namespace Evaluator {
               // R rules: TRUE | NA -> TRUE; FALSE | NA -> NA; NA | NA -> NA
               int out;
               if (a == 1 || b == 1) out = 1;
-              else if (a == -1 || b == -1) out = -1;
+              else if (a == R_LOGICAL_NA || b == R_LOGICAL_NA) out = R_LOGICAL_NA;
               else out = 0;
               res->i_vec.push_back(out);
           }
@@ -470,7 +470,7 @@ namespace Evaluator {
         auto res = std::make_shared<RValue>(RType::LOGICAL);
         for (int i = 0; i < x->Length(); ++i) {
             int v = AsLogicalAt(x, i);
-            res->i_vec.push_back(v == -1 ? -1 : (v == 1 ? 0 : 1));
+            res->i_vec.push_back(v == R_LOGICAL_NA ? R_LOGICAL_NA : (v == 1 ? 0 : 1));
         }
         return res;
     }
@@ -615,18 +615,18 @@ namespace Evaluator {
                 
                 if (eq) { found = k + 1; break; } // 1-based index
             }
-            res->i_vec.push_back(found != -1 ? found : -1); // -1 for NA
+            res->i_vec.push_back(found != -1 ? found : R_INT_NA);
         }
         return res;
     }
-    
+
     RValuePtr Builtin_In(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
         // x %in% table -> match(x, table, nomatch=0) > 0
         RValuePtr m = Builtin_Match(args, names, env);
         if (m->type == RType::ERROR) return m;
         
         auto res = std::make_shared<RValue>(RType::LOGICAL);
-        for(int v : m->i_vec) res->i_vec.push_back(v > 0 ? 1 : 0);
+        for(int v : m->i_vec) res->i_vec.push_back(v == R_INT_NA ? R_LOGICAL_NA : (v > 0 ? 1 : 0));
         return res;
     }
 
@@ -1011,8 +1011,15 @@ namespace Evaluator {
     }
     RValuePtr Builtin_IsList(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
+        RValuePtr x = args[0];
+        bool is_list = (x->type == RType::LIST);
+        if (!is_list && x->attributes.count("class")) {
+            RValuePtr cls = x->attributes["class"];
+            if (cls->type == RType::CHARACTER)
+                for (const auto& c : cls->s_vec) if (c == "data.frame") { is_list = true; break; }
+        }
         auto res = std::make_shared<RValue>(RType::LOGICAL);
-        res->i_vec.push_back(args[0]->type == RType::LIST ? 1 : 0);
+        res->i_vec.push_back(is_list ? 1 : 0);
         return res;
     }
     RValuePtr Builtin_IsNull(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
@@ -1269,7 +1276,7 @@ namespace Evaluator {
         // Data defaults
         if (!data) { 
             data = std::make_shared<RValue>(RType::LOGICAL); 
-            data->i_vec.push_back(-1); // NA
+            data->i_vec.push_back(R_LOGICAL_NA);
         }
         
         int nr = nrow_arg ? nrow_arg->GetInt(0) : 1;
@@ -1396,9 +1403,10 @@ namespace Evaluator {
                      if (x->type == RType::CHARACTER) res->s_vec.push_back(x->s_vec[i]);
                      if (x->type == RType::LIST) res->l_vec.push_back(x->l_vec[i]);
                 } else {
-                    // NA?
-                    if (x->type == RType::DOUBLE) res->d_vec.push_back(0); // 0 or NAN
-                    if (x->type == RType::INTEGER) res->i_vec.push_back(-1); // NA
+                    // NA index -> NA in result
+                    if (x->type == RType::DOUBLE) res->d_vec.push_back(NAReal());
+                    if (x->type == RType::INTEGER) res->i_vec.push_back(R_INT_NA);
+                    if (x->type == RType::LOGICAL) res->i_vec.push_back(R_LOGICAL_NA);
                 }
             }
             return res;
@@ -1440,6 +1448,16 @@ namespace Evaluator {
          return RR_Nil();
     }
 
+    RValuePtr Builtin_NCol(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+         if (args.empty()) return RR_Nil();
+         if (args[0]->attributes.count("dim")) {
+             auto r = std::make_shared<RValue>(RType::INTEGER);
+             r->i_vec.push_back(args[0]->attributes["dim"]->GetInt(1));
+             return r;
+         }
+         return RR_Nil();
+    }
+
     // --- SUMMARIES ---
     
     // Generic Aggregator
@@ -1474,7 +1492,7 @@ namespace Evaluator {
                  if (x->i_vec[i] == R_INT_NA) res->s_vec.push_back("NA");
                  else res->s_vec.push_back(std::to_string(x->i_vec[i]));
              } else if (x->type == RType::LOGICAL) {
-                 if (x->i_vec[i] == -1) res->s_vec.push_back("NA");
+                 if (x->i_vec[i] == R_LOGICAL_NA) res->s_vec.push_back("NA");
                  else res->s_vec.push_back(x->i_vec[i] ? "TRUE" : "FALSE");
              }
              else if (x->type == RType::CHARACTER) res->s_vec.push_back(x->s_vec[i]);
@@ -1511,14 +1529,14 @@ namespace Evaluator {
                 is_na = std::isnan(x->d_vec[i]);
             } else if (x->type == RType::INTEGER) {
                 is_na = (x->i_vec[i] == R_INT_NA);
-            } else if (x->type == RType::LOGICAL) {
-                is_na = (x->i_vec[i] == -1);
+} else if (x->type == RType::LOGICAL) {
+                is_na = (x->i_vec[i] == R_LOGICAL_NA);
             }
             res->i_vec.push_back(is_na ? 1 : 0);
         }
         return res;
     }
-    
+
     // --- INDEXING & PARALLEL ---
 
     // which(x, arr.ind=FALSE) - Simplified: just flat indices
@@ -1901,48 +1919,53 @@ namespace Evaluator {
         bool na_rm = narm_arg ? IsTrue(narm_arg) : false;
         
         double sum = 0;
-        double min_val = 1e9; // infinity
-        double max_val = -1e9;
-        bool any = false;
-        bool all = true;
-        
-        int count = 0;
+        double min_val = std::numeric_limits<double>::infinity();
+        double max_val = -std::numeric_limits<double>::infinity();
+        bool any_val = false;
+        bool all_val = true;
+        int count = 0;   // number of non-NA values (for na_rm)
+        bool seen_na = false;
         
         for(size_t k=0; k<args.size(); ++k) {
-             // skip named args (like na.rm) if it WAS passed as named arg
-             // Simplification: if args[k] == narm_arg, skip
              if (args[k] == narm_arg) continue;
              
              RValuePtr v = args[k];
              int len = v->Length();
              for(int i=0; i<len; ++i) {
-                 // Check NA
-                 // Logic: if NA and na_rm -> continue
-                 // if NA and !na_rm -> return NA
-                 // For now, assume simplified -1 logic for NA in int, need cleaner check
-                 
                  double d = v->GetDouble(i);
-                 // Check NA? 
-                 // Assuming standard double logic for now. 
+                 bool is_na = std::isnan(d);
                  
+                 if (is_na) {
+                     if (na_rm) continue;
+                     seen_na = true;
+                     break;
+                 }
+                 count++;
                  if (op == 0) sum += d;
                  if (op == 1) if (d > max_val) max_val = d;
                  if (op == 2) if (d < min_val) min_val = d;
-                 if (op == 3) if (d != 0) any = true;
-                 if (op == 4) if (d == 0) all = false;
-                 
-                 count++;
+                 if (op == 3) if (d != 0) any_val = true;
+                 if (op == 4) if (d == 0) all_val = false;
              }
+             if (seen_na && !na_rm) break;
         }
         
         auto res = std::make_shared<RValue>(RType::DOUBLE);
-        if (op == 0) res->d_vec.push_back(sum);
-        if (op == 1) res->d_vec.push_back(max_val);
-        if (op == 2) res->d_vec.push_back(min_val);
-        
-        if (op == 3 || op == 4) {
+        if (op == 0) {
+             if (seen_na && !na_rm) res->d_vec.push_back(NAReal());
+             else res->d_vec.push_back(sum);
+        } else if (op == 1) {
+             if (seen_na && !na_rm) res->d_vec.push_back(NAReal());
+             else if (na_rm && count == 0) res->d_vec.push_back(-std::numeric_limits<double>::infinity());
+             else res->d_vec.push_back(max_val);
+        } else if (op == 2) {
+             if (seen_na && !na_rm) res->d_vec.push_back(NAReal());
+             else if (na_rm && count == 0) res->d_vec.push_back(std::numeric_limits<double>::infinity());
+             else res->d_vec.push_back(min_val);
+        } else if (op == 3 || op == 4) {
              res->type = RType::LOGICAL;
-             res->i_vec.push_back(op == 3 ? (any?1:0) : (all?1:0));
+             if (seen_na && !na_rm) res->i_vec.push_back(R_LOGICAL_NA);
+             else res->i_vec.push_back(op == 3 ? (any_val ? 1 : 0) : (all_val ? 1 : 0));
              res->d_vec.clear();
         }
         
@@ -1957,13 +1980,24 @@ namespace Evaluator {
     
     RValuePtr Builtin_Mean(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
         if (args.empty()) return RR_Nil();
+        RValuePtr narm_arg = GetArg(args, names, "na.rm", (int)args.size() - 1, nullptr);
+        bool na_rm = narm_arg ? IsTrue(narm_arg) : false;
         RValuePtr s = Builtin_Sum(args, names, env);
         if (s->type == RType::ERROR) return s;
         double sum = s->GetDouble(0);
         int count = 0;
-        for (auto& arg : args) count += arg->Length();
+        if (na_rm) {
+            for (size_t k = 0; k < args.size(); ++k) {
+                if (args[k] == narm_arg) continue;
+                RValuePtr v = args[k];
+                for (int i = 0; i < v->Length(); ++i)
+                    if (!std::isnan(v->GetDouble(i))) count++;
+            }
+        } else {
+            for (auto& arg : args) if (arg != narm_arg) count += arg->Length();
+        }
         auto res = std::make_shared<RValue>(RType::DOUBLE);
-        res->d_vec.push_back(count > 0 ? sum / count : 0.0/0.0);
+        res->d_vec.push_back(count > 0 ? sum / count : NAReal());
         return res;
     }
 
@@ -2258,7 +2292,7 @@ namespace Evaluator {
             return std::to_string(x);
         };
         auto fmtLgl = [](int x) -> std::string {
-            if (x == -1) return "NA";
+            if (x == R_LOGICAL_NA) return "NA";
             return x ? "TRUE" : "FALSE";
         };
 

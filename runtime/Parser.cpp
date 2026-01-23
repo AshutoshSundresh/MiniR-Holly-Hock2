@@ -21,7 +21,7 @@ Parser::Parser(const std::vector<Token>& tokens) : tokens(tokens) {
 }
 
 Token Parser::Current() const {
-    if (pos >= (int)tokens.size()) return tokens.back(); // Should be EOF
+    if (tokens.empty() || pos >= (int)tokens.size()) return Token{TokenType::eof, "", 0, 0};
     return tokens[pos];
 }
 
@@ -193,7 +193,7 @@ RValuePtr Parser::ParsePrimary() {
              auto r = std::make_shared<RValue>(RType::LOGICAL); r->i_vec.push_back(0); return r;
         }
         if (t.text == "NA") {
-             auto r = std::make_shared<RValue>(RType::LOGICAL); r->i_vec.push_back(-1); return r;
+             auto r = std::make_shared<RValue>(RType::LOGICAL); r->i_vec.push_back(R_LOGICAL_NA); return r;
         }
         if (t.text == "NULL") {
              return RR_Nil();
