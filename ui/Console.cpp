@@ -85,6 +85,15 @@ void Console::ClearInput() {
     current_line = "";
 }
 
+void Console::Clear() {
+    scrollback.clear();
+    scrollback.push_back("(cleared)");
+    input_accumulator.clear();
+    current_line.clear();
+    pending_command.clear();
+    scroll_offset = 0;
+}
+
 void Console::Print(const char* str) {
     // Append to last line or push new? 
     // Simplified: PrintLine

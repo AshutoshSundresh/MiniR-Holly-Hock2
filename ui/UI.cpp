@@ -28,22 +28,25 @@ void UI::Update() {
     // Check for pending command
     if (console.HasPendingCommand()) {
         std::string src = console.PopPendingCommand();
+        while (!src.empty() && (src.back() == '\n' || src.back() == '\r')) src.pop_back();
         if (src == "cls") {
-             // console.Clear(); // Todo
+            console.Clear();
         } else {
-             // REPL
-             Lexer lex(src);
-             auto tokens = lex.Tokenize();
-             Parser parser(tokens);
-             RValuePtr ast = parser.Parse();
-             
-             if (parser.HasError()) {
-                 console.PrintLine(("Error: " + parser.GetError()).c_str());
-             } else {
-                 RValuePtr res = Evaluator::Eval(ast, global_env);
-                 std::string out = Evaluator::ToString(res);
-                 console.PrintLine(out.c_str());
-             }
+            Lexer lex(src);
+            auto tokens = lex.Tokenize();
+            Parser parser(tokens);
+            RValuePtr ast = parser.Parse();
+            if (parser.HasError()) {
+                console.PrintLine(("Error: " + parser.GetError()).c_str());
+            } else {
+                RValuePtr res = Evaluator::Eval(ast, global_env);
+                if (res && res->type == RType::ERROR) {
+                    console.PrintLine(("Error: " + res->sym_name).c_str());
+                } else if (res && res->type != RType::NIL) {
+                    std::string out = Evaluator::ToString(res);
+                    if (!out.empty()) console.PrintLine(out.c_str());
+                }
+            }
         }
     }
 }

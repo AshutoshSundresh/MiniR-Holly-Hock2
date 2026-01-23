@@ -13,6 +13,7 @@ public:
     void Backspace();
     void Enter(); // Completes line or adds newline
     void ClearInput();
+    void Clear();  // Clear scrollback and input (e.g. for cls)
     
     // Output
     void Print(const char* str);

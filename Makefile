@@ -13,7 +13,7 @@ CC:=sh4-elf-gcc
 CC_FLAGS:=-ffreestanding -fshort-wchar -Wall -Wextra -O2 -I $(SDK_DIR)/include/
 
 CXX:=sh4-elf-g++
-CXX_FLAGS:=-ffreestanding -fno-exceptions -fno-rtti -fshort-wchar -Wall -Wextra -O2 -I $(SDK_DIR)/include/ -m4a-nofpu
+CXX_FLAGS:=-ffreestanding -fno-exceptions -fno-rtti -fshort-wchar -Wall -Wextra -O2 -I . -I $(SDK_DIR)/include/ -m4a-nofpu
 
 LD:=sh4-elf-ld
 LD_FLAGS:=-nostdlib --no-undefined
@@ -23,7 +23,10 @@ OBJCOPY:=sh4-elf-objcopy
 
 AS_SOURCES:=$(wildcard *.s)
 CC_SOURCES:=$(wildcard *.c)
-CXX_SOURCES:=$(wildcard *.cpp)
+# Calculator app: main.cpp + runtime + ui (exclude cli_main.cpp for CLI build)
+RUNTIME_CPP:=$(wildcard runtime/*.cpp)
+UI_CPP:=$(wildcard ui/*.cpp)
+CXX_SOURCES:=$(filter-out cli_main.cpp,$(wildcard *.cpp)) $(RUNTIME_CPP) $(UI_CPP)
 OBJECTS:=$(AS_SOURCES:.s=.o) $(CC_SOURCES:.c=.o) $(CXX_SOURCES:.cpp=.o)
 
 APP_ELF:=$(APP_NAME).hhk
@@ -66,6 +69,7 @@ $(SDK_DIR)/sdk.o:
 # object file (so that on subsequent runs of make the build will still fail)
 # and exit with an error code to halt the build.
 %.o: %.cpp
+	@mkdir -p $(dir $@)
 	$(CXX) -c $< -o $@ $(CXX_FLAGS)
 	@$(READELF) $@ -S | grep ".ctors" > /dev/null && echo "ERROR: Global constructors aren't supported." && rm $@ && exit 1 || exit 0
 
