@@ -947,35 +947,40 @@ namespace Evaluator {
     }
     
     // --- STATISTICS ---
-    // var(x), sd(x) => denominator n-1
+    // var(x), sd(x) => denominator n-1; na.rm supported
     RValuePtr Builtin_Var(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
-        RValuePtr x = args[0];
+        RValuePtr narm_arg = GetArg(args, names, "na.rm", (int)args.size() - 1, nullptr);
+        bool na_rm = narm_arg ? IsTrue(narm_arg) : false;
+        RValuePtr x = nullptr;
+        for (size_t i = 0; i < args.size(); ++i) { if (args[i] != narm_arg) { x = args[i]; break; } }
+        if (!x || x->Length() == 0) {
+            auto r = std::make_shared<RValue>(RType::DOUBLE); r->d_vec.push_back(NAReal()); return r;
+        }
         int n = 0;
         double sum = 0;
         std::vector<double> vals;
-        
-        RValuePtr narm = GetArg(args, names, "na.rm", -1);
-        bool rm = narm ? IsTrue(narm) : false;
-        
-        for(int i=0; i<x->Length(); ++i) {
-             double d = x->GetDouble(i);
-             // Check NA? 
-             vals.push_back(d);
-             sum += d;
-             n++;
+        bool seen_na = false;
+        for (int i = 0; i < x->Length(); ++i) {
+            double d = x->GetDouble(i);
+            if (std::isnan(d)) {
+                if (na_rm) continue;
+                seen_na = true;
+                break;
+            }
+            vals.push_back(d);
+            sum += d;
+            n++;
         }
-        
+        if (seen_na && !na_rm) {
+            auto r = std::make_shared<RValue>(RType::DOUBLE); r->d_vec.push_back(NAReal()); return r;
+        }
         if (n < 2) {
-             auto r = std::make_shared<RValue>(RType::DOUBLE);
-             r->d_vec.push_back(0.0/0.0); // NaN
-             return r;
+            auto r = std::make_shared<RValue>(RType::DOUBLE); r->d_vec.push_back(NAReal()); return r;
         }
-        
         double mean = sum / n;
         double sq_diff = 0;
-        for(double v : vals) sq_diff += (v - mean) * (v - mean);
-        
+        for (double v : vals) sq_diff += (v - mean) * (v - mean);
         auto res = std::make_shared<RValue>(RType::DOUBLE);
         res->d_vec.push_back(sq_diff / (n - 1));
         return res;
@@ -983,7 +988,8 @@ namespace Evaluator {
     
     RValuePtr Builtin_Sd(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
         RValuePtr v = Builtin_Var(args, names, env);
-        if (!v->d_vec.empty()) {
+        if (v->type == RType::ERROR) return v;
+        if (!v->d_vec.empty() && !std::isnan(v->d_vec[0])) {
             v->d_vec[0] = std::sqrt(v->d_vec[0]);
         }
         return v;
@@ -1347,38 +1353,39 @@ namespace Evaluator {
             RValuePtr drop_arg = GetArg(args, names, "drop", -1);
             if (drop_arg) drop = IsTrue(drop_arg);
             
-            // If rows is missing (NIL), use all 1..nr
+            // Row indices: -1 means NA (output NA), else 0-based valid index
             std::vector<int> r_idx;
             if (rows->type == RType::NIL) {
                 for(int i=0; i<nr; ++i) r_idx.push_back(i);
             } else {
                 for(int k=0; k<rows->Length(); ++k) {
-                    int idx = rows->GetInt(k) - 1; // 1-based to 0-based
-                    if (idx >= 0 && idx < nr) r_idx.push_back(idx);
+                    int raw = rows->GetInt(k);
+                    if (raw == R_INT_NA) { r_idx.push_back(-1); continue; }
+                    int idx = raw - 1;
+                    r_idx.push_back((idx >= 0 && idx < nr) ? idx : -1);
                 }
             }
-            
             std::vector<int> c_idx;
             if (cols->type == RType::NIL) {
                 for(int i=0; i<nc; ++i) c_idx.push_back(i);
             } else {
                 for(int k=0; k<cols->Length(); ++k) {
-                    int idx = cols->GetInt(k) - 1;
-                    if (idx >= 0 && idx < nc) c_idx.push_back(idx);
+                    int raw = cols->GetInt(k);
+                    if (raw == R_INT_NA) { c_idx.push_back(-1); continue; }
+                    int idx = raw - 1;
+                    c_idx.push_back((idx >= 0 && idx < nc) ? idx : -1);
                 }
             }
-            
             bool ret_matrix = (r_idx.size() > 1 && c_idx.size() > 1) || !drop;
-            // If explicit drop=FALSE, always return matrix (unless 0 dims?)
-            
-            auto res = std::make_shared<RValue>(RType::DOUBLE); // Simplify type
-            for(int c : c_idx) {
-                for(int r : r_idx) {
-                    int flat_idx = c * nr + r;
-                    res->d_vec.push_back(x->GetDouble(flat_idx));
+            auto res = std::make_shared<RValue>(RType::DOUBLE);
+            for (int c : c_idx) {
+                for (int r : r_idx) {
+                    if (r == -1 || c == -1)
+                        res->d_vec.push_back(NAReal());
+                    else
+                        res->d_vec.push_back(x->GetDouble(c * nr + r));
                 }
             }
-            
             if (ret_matrix || !drop) {
                 auto new_dim = std::make_shared<RValue>(RType::INTEGER);
                 new_dim->i_vec = {(int)r_idx.size(), (int)c_idx.size()};
@@ -1420,22 +1427,25 @@ namespace Evaluator {
         if (args.size() < 2) return RR_Error("Need index for [[");
         RValuePtr x = args[0];
         RValuePtr idx = args[1];
-        int i = idx->GetInt(0) - 1;
-        
-        if (i < 0 || i >= x->Length()) return RR_Error("Subscript out of bounds");
-        
-        if (x->type == RType::LIST) {
-            return x->l_vec[i];
-        } else {
-             // For atomic vectors, [[i]] is same as [i] but single
-             // Return scalar (length 1 vector in R)
-             auto res = std::make_shared<RValue>(x->type);
-             if (x->type == RType::DOUBLE) res->d_vec.push_back(x->d_vec[i]);
-             if (x->type == RType::INTEGER) res->i_vec.push_back(x->i_vec[i]);
-             if (x->type == RType::LOGICAL) res->i_vec.push_back(x->i_vec[i]);
-             if (x->type == RType::CHARACTER) res->s_vec.push_back(x->s_vec[i]);
-             return res;
+        int raw = idx->GetInt(0);
+        if (raw == R_INT_NA) {
+            // R: x[[NA_integer_]] returns NA (atomic) or NULL (list)
+            if (x->type == RType::LIST) return RR_Nil();
+            auto res = std::make_shared<RValue>(x->type);
+            if (x->type == RType::DOUBLE) res->d_vec.push_back(NAReal());
+            if (x->type == RType::INTEGER || x->type == RType::LOGICAL) res->i_vec.push_back(x->type == RType::LOGICAL ? R_LOGICAL_NA : R_INT_NA);
+            if (x->type == RType::CHARACTER) res->s_vec.push_back("NA");
+            return res;
         }
+        int i = raw - 1;
+        if (i < 0 || i >= x->Length()) return RR_Error("Subscript out of bounds");
+        if (x->type == RType::LIST) return x->l_vec[i];
+        auto res = std::make_shared<RValue>(x->type);
+        if (x->type == RType::DOUBLE) res->d_vec.push_back(x->d_vec[i]);
+        if (x->type == RType::INTEGER) res->i_vec.push_back(x->i_vec[i]);
+        if (x->type == RType::LOGICAL) res->i_vec.push_back(x->i_vec[i]);
+        if (x->type == RType::CHARACTER) res->s_vec.push_back(x->s_vec[i]);
+        return res;
     }
 
     RValuePtr Builtin_NRow(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
