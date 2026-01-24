@@ -131,6 +131,75 @@ namespace Evaluator {
         return default_val;
     }
 
+    // Clone x (shallow copy of vectors and attributes)
+    static RValuePtr CloneForAssign(RValuePtr x) {
+        auto r = std::make_shared<RValue>(x->type);
+        r->d_vec = x->d_vec;
+        r->i_vec = x->i_vec;
+        r->s_vec = x->s_vec;
+        r->l_vec = x->l_vec;
+        r->attributes = x->attributes;
+        r->sym_name = x->sym_name;
+        return r;
+    }
+
+    // Subassignment: x[i] <- value, x[i,j] <- value, x[[i]] <- value, x$name <- value. Returns modified clone.
+    static RValuePtr SubAssign(RValuePtr x, const std::string& op, const std::vector<RValuePtr>& index_vals, RValuePtr value, std::string& err) {
+        err.clear();
+        if (!x) { err = "object not found"; return nullptr; }
+        RValuePtr res = CloneForAssign(x);
+        if (op == "$") {
+            if (x->type != RType::LIST || index_vals.empty()) { err = "invalid $ assignment"; return nullptr; }
+            std::string key = index_vals[0]->type == RType::CHARACTER ? index_vals[0]->s_vec[0] : index_vals[0]->sym_name;
+            if (!res->attributes.count("names")) { err = "no names for $ assign"; return nullptr; }
+            RValuePtr names_attr = res->attributes["names"];
+            for (size_t i = 0; i < res->l_vec.size() && i < (size_t)names_attr->Length(); ++i) {
+                if (names_attr->s_vec[i] == key) { res->l_vec[i] = value; return res; }
+            }
+            err = "name not found for $ assign"; return nullptr;
+        }
+        if (op == "[[") {
+            if (index_vals.empty()) { err = "need index for [[ assign"; return nullptr; }
+            int i = index_vals[0]->GetInt(0) - 1;
+            if (i < 0 || i >= res->Length()) { err = "Subscript out of bounds"; return nullptr; }
+            if (res->type == RType::LIST) { res->l_vec[i] = value; return res; }
+            if (res->type == RType::DOUBLE) res->d_vec[i] = value->GetDouble(0);
+            else if (res->type == RType::INTEGER || res->type == RType::LOGICAL) res->i_vec[i] = value->Length() ? value->GetInt(0) : R_INT_NA;
+            else if (res->type == RType::CHARACTER) res->s_vec[i] = value->Length() ? value->s_vec[0] : "NA";
+            return res;
+        }
+        if (op == "[") {
+            if (index_vals.empty()) { err = "need index for [ assign"; return nullptr; }
+            if (res->attributes.count("dim") && index_vals.size() >= 2) {
+                int nr = res->attributes["dim"]->GetInt(0);
+                int nc = res->attributes["dim"]->GetInt(1);
+                int r = index_vals[0]->GetInt(0) - 1;
+                int c = index_vals[1]->GetInt(0) - 1;
+                if (r >= 0 && r < nr && c >= 0 && c < nc) {
+                    int flat = c * nr + r;
+                    res->d_vec[flat] = value->Length() ? value->GetDouble(0) : NAReal();
+                }
+                return res;
+            }
+            RValuePtr idx = index_vals[0];
+            int nidx = idx->Length();
+            int vlen = value->Length();
+            if (vlen == 0) { err = "replacement has length zero"; return nullptr; }
+            for (int k = 0; k < nidx; ++k) {
+                int i = idx->GetInt(k) - 1;
+                if (i == R_INT_NA - 1 || i < 0) continue;
+                if (i >= res->Length()) { err = "Subscript out of bounds"; return nullptr; }
+                double v = value->GetDouble(k % vlen);
+                int vi = value->Length() ? value->GetInt(k % vlen) : R_INT_NA;
+                if (res->type == RType::DOUBLE) res->d_vec[i] = v;
+                else if (res->type == RType::INTEGER || res->type == RType::LOGICAL) res->i_vec[i] = vi;
+                else if (res->type == RType::CHARACTER) res->s_vec[i] = value->s_vec[k % vlen];
+            }
+            return res;
+        }
+        err = "invalid subassignment op"; return nullptr;
+    }
+
     // --- BUILTINS ---
 
     // assign(x, value, ...) — assign value to name x in environment (R: assign("name", value))
@@ -2438,13 +2507,46 @@ namespace Evaluator {
                 // Handle special forms based on symbol name BEFORE eval ?
                 if (head->type == RType::SYMBOL) {
                     if (head->sym_name == "<-" || head->sym_name == "=") {
-                         // Assignment: (<- sym val)
                          if (exp->l_vec.size() != 3) return RR_Error("Bad assignment");
-                         RValuePtr sym = exp->l_vec[1];
-                         if (sym->type != RType::SYMBOL) return RR_Error("LHS must be symbol");
+                         RValuePtr lhs = exp->l_vec[1];
                          RValuePtr val = Eval(exp->l_vec[2], env);
-                         Define(sym->sym_name, val, env);
-                         return val;
+                         if (val->type == RType::ERROR) return val;
+                         std::string target_name;
+                         RValuePtr x;
+                         std::string sub_op;
+                         std::vector<RValuePtr> index_vals;
+                         if (lhs->type == RType::SYMBOL) {
+                             target_name = lhs->sym_name;
+                             Define(target_name, val, env);
+                             return val;
+                         }
+                         if (lhs->type == RType::LIST && !lhs->l_vec.empty() && lhs->l_vec[0]->type == RType::SYMBOL) {
+                             sub_op = lhs->l_vec[0]->sym_name;
+                             if (sub_op == "[" || sub_op == "[[" || sub_op == "$") {
+                                 if (lhs->l_vec.size() < 2) return RR_Error("Bad subassignment");
+                                 RValuePtr target = lhs->l_vec[1];
+                                 if (target->type != RType::SYMBOL) return RR_Error("invalid assignment target");
+                                 target_name = target->sym_name;
+                                 x = Lookup(target_name, env);
+                                 if (!x) return RR_Error("object '" + target_name + "' not found");
+                                 for (size_t i = 2; i < lhs->l_vec.size(); ++i) {
+                                     if (sub_op == "$" && i == 2 && lhs->l_vec[i]->type == RType::SYMBOL)
+                                         index_vals.push_back(lhs->l_vec[i]); // name: use symbol, not evaluated
+                                     else {
+                                         RValuePtr idx = Eval(lhs->l_vec[i], env);
+                                         if (idx->type == RType::ERROR) return idx;
+                                         index_vals.push_back(idx);
+                                     }
+                                 }
+                                 std::string err;
+                                 RValuePtr modified = SubAssign(x, sub_op, index_vals, val, err);
+                                 if (!err.empty()) return RR_Error(err);
+                                 if (!modified) return RR_Error("subassignment failed");
+                                 Define(target_name, modified, env);
+                                 return modified;
+                             }
+                         }
+                         return RR_Error("LHS must be a symbol or subset expression (e.g. x[i], x$name)");
                     }
                     if (head->sym_name == "if") {
                         // (if cond then else)

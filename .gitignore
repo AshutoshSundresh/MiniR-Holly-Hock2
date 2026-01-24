@@ -1,0 +1,8 @@
+# Build outputs
+*.obj
+*.o
+*.exe
+minir.exe
+
+# Build logs
+build*.log
