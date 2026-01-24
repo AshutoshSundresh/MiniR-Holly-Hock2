@@ -26,6 +26,10 @@ using RValuePtr = std::shared_ptr<RValue>;
 // Forward decl for Builtin function pointer
 using BuiltinFunc = RValuePtr (*)(const std::vector<RValuePtr>& args, const std::vector<std::string>& arg_names, RValuePtr env);
 
+// NA constants (before RValue so GetDouble/GetInt can use them)
+const int R_INT_NA = -2147483648;
+const int R_LOGICAL_NA = -1;
+
 struct RValue {
     RType type;
     
@@ -94,7 +98,3 @@ inline RValuePtr RR_Error(const std::string& msg) {
     r->sym_name = msg; 
     return r; 
 }
-
-// NA constants
-const int R_INT_NA = -2147483648; // Standard R-ish NA? Or just use min int.
-const int R_LOGICAL_NA = -1;
