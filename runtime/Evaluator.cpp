@@ -229,8 +229,22 @@ namespace Evaluator {
             for (auto& arg : args) {
                 if (arg->type == RType::CHARACTER) {
                     res->s_vec.insert(res->s_vec.end(), arg->s_vec.begin(), arg->s_vec.end());
-                } else if (arg->type == RType::DOUBLE || arg->type == RType::INTEGER || arg->type == RType::LOGICAL) {
-                    for (int i = 0; i < arg->Length(); ++i) res->s_vec.push_back(std::to_string(arg->GetDouble(i)));
+                } else if (arg->type == RType::INTEGER) {
+                    for (int i = 0; i < arg->Length(); ++i)
+                        res->s_vec.push_back(arg->i_vec[i] == R_INT_NA ? "NA" : std::to_string(arg->i_vec[i]));
+                } else if (arg->type == RType::LOGICAL) {
+                    for (int i = 0; i < arg->Length(); ++i) {
+                        int v = arg->i_vec[i];
+                        res->s_vec.push_back(v == R_LOGICAL_NA ? "NA" : (v ? "TRUE" : "FALSE"));
+                    }
+                } else if (arg->type == RType::DOUBLE) {
+                    for (int i = 0; i < arg->Length(); ++i) {
+                        double d = arg->d_vec[i];
+                        if (std::isnan(d)) res->s_vec.push_back("NA");
+                        else if (d == std::floor(d) && d >= INT32_MIN && d <= INT32_MAX)
+                            res->s_vec.push_back(std::to_string(static_cast<int>(d)));
+                        else res->s_vec.push_back(std::to_string(d));
+                    }
                 }
             }
             return res;
