@@ -134,8 +134,9 @@ RValuePtr Parser::ParseExpression(int precedence) {
              call->l_vec.push_back(s);
              left = call;
         } else {
-            // Binary Operator
-            RValuePtr right = ParseExpression(GetPrecedence(op.type));
+            // Binary Operator. ^ is right-associative in R (2^3^2 = 2^(3^2)), so parse RHS with lower precedence.
+            int rhs_prec = (op.type == TokenType::power) ? GetPrecedence(op.type) - 1 : GetPrecedence(op.type);
+            RValuePtr right = ParseExpression(rhs_prec);
             
             auto call = std::make_shared<RValue>(RType::LIST);
             // Function name is the operator
