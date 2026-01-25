@@ -1076,7 +1076,7 @@ namespace Evaluator {
     // var(x), sd(x) => denominator n-1; na.rm supported
     RValuePtr Builtin_Var(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
-        RValuePtr narm_arg = GetArg(args, names, "na.rm", (int)args.size() - 1, nullptr);
+        RValuePtr narm_arg = GetArg(args, names, "na.rm", 1, nullptr);
         bool na_rm = narm_arg ? IsTrue(narm_arg) : false;
         RValuePtr x = nullptr;
         for (size_t i = 0; i < args.size(); ++i) { if (args[i] != narm_arg) { x = args[i]; break; } }
@@ -2091,7 +2091,8 @@ namespace Evaluator {
     }
 
     RValuePtr Builtin_Summary(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env, int op) {
-        RValuePtr narm_arg = GetArg(args, names, "na.rm", (int)args.size() - 1, nullptr);
+        // na.rm is 2nd param (e.g. sum(x, na.rm=FALSE)); don't use last arg position or we steal the only arg for mean(x)
+        RValuePtr narm_arg = GetArg(args, names, "na.rm", 1, nullptr);
         bool na_rm = narm_arg ? IsTrue(narm_arg) : false;
         
         double sum = 0;
@@ -2156,7 +2157,7 @@ namespace Evaluator {
     
     RValuePtr Builtin_Mean(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
         if (args.empty()) return RR_Nil();
-        RValuePtr narm_arg = GetArg(args, names, "na.rm", (int)args.size() - 1, nullptr);
+        RValuePtr narm_arg = GetArg(args, names, "na.rm", 1, nullptr);
         bool na_rm = narm_arg ? IsTrue(narm_arg) : false;
         RValuePtr s = Builtin_Sum(args, names, env);
         if (s->type == RType::ERROR) return s;
@@ -2294,7 +2295,7 @@ namespace Evaluator {
     static RValuePtr Builtin_RowColOp(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env, bool row_op, bool do_mean) {
         if (args.empty()) return RR_Nil();
         RValuePtr x = args[0];
-        RValuePtr narm_arg = GetArg(args, names, "na.rm", (int)args.size() - 1, nullptr);
+        RValuePtr narm_arg = GetArg(args, names, "na.rm", 1, nullptr);
         bool na_rm = narm_arg ? IsTrue(narm_arg) : false;
         int nr = 1, nc = x->Length();
         if (x->attributes.count("dim")) {
