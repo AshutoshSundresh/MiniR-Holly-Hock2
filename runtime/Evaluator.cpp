@@ -280,7 +280,8 @@ namespace Evaluator {
     }
 
     RValuePtr Builtin_Add(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
-        if (args.size() < 2) return RR_Error("Need 2 args for +");
+        if (args.empty()) return RR_Error("Need 1 or 2 args for +");
+        if (args.size() == 1) return args[0]; // unary + is identity
         int lenA = args[0]->Length();
         int lenB = args[1]->Length();
         if (lenA == 0 || lenB == 0) {
@@ -312,7 +313,27 @@ namespace Evaluator {
     }
     
     RValuePtr Builtin_Diff(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
-         if (args.size() < 2) return RR_Error("Need 2 args for -");
+         if (args.empty()) return RR_Error("Need 1 or 2 args for -");
+         if (args.size() == 1) {
+             // unary minus: negate
+             RValuePtr x = args[0];
+             int n = x->Length();
+             if (n == 0) return std::make_shared<RValue>(x->type == RType::DOUBLE ? RType::DOUBLE : RType::INTEGER);
+             if (x->type == RType::DOUBLE) {
+                 auto res = std::make_shared<RValue>(RType::DOUBLE);
+                 for (int i = 0; i < n; ++i) res->d_vec.push_back(-x->GetDouble(i));
+                 return res;
+             }
+             if (x->type == RType::INTEGER || x->type == RType::LOGICAL) {
+                 auto res = std::make_shared<RValue>(RType::INTEGER);
+                 for (int i = 0; i < n; ++i) {
+                     int v = x->i_vec[i];
+                     res->i_vec.push_back((v == R_INT_NA || v == R_LOGICAL_NA) ? R_INT_NA : IntOpResultOrNA(-(int64_t)v));
+                 }
+                 return res;
+             }
+             return RR_Error("Unary - needs numeric");
+         }
          int lenA = args[0]->Length();
          int lenB = args[1]->Length();
          if (lenA == 0 || lenB == 0) {

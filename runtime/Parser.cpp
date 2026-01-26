@@ -278,6 +278,28 @@ RValuePtr Parser::ParsePrimary() {
         }
     }
     
+    // Unary + and - (e.g. -2, +1 in c(-2,-1,0,1,2))
+    if (Match(TokenType::minus)) {
+        RValuePtr rhs = ParseExpression(PREC_EXPONENT);
+        if (error_state) return rhs;
+        auto call = std::make_shared<RValue>(RType::LIST);
+        auto func = std::make_shared<RValue>(RType::SYMBOL);
+        func->sym_name = "-";
+        call->l_vec.push_back(func);
+        call->l_vec.push_back(rhs);
+        return call;
+    }
+    if (Match(TokenType::plus)) {
+        RValuePtr rhs = ParseExpression(PREC_EXPONENT);
+        if (error_state) return rhs;
+        auto call = std::make_shared<RValue>(RType::LIST);
+        auto func = std::make_shared<RValue>(RType::SYMBOL);
+        func->sym_name = "+";
+        call->l_vec.push_back(func);
+        call->l_vec.push_back(rhs);
+        return call;
+    }
+    
     if (Match(TokenType::lparen)) {
         RValuePtr expr = ParseExpression();
         Consume(TokenType::rparen, "Expect ')'");
