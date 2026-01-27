@@ -426,6 +426,41 @@ namespace Evaluator {
         return res;
     }
 
+    // Comparison ops: < > <= >= == !=  (elementwise, recycle, return LOGICAL; NA propagates)
+    enum class CmpOp { LT, GT, LE, GE, EQ, NE };
+    static RValuePtr Builtin_Compare(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env, CmpOp op) {
+        if (args.size() < 2) return RR_Error("Need 2 args for comparison");
+        RValuePtr a = args[0], b = args[1];
+        int lenA = a->Length(), lenB = b->Length();
+        if (lenA == 0 || lenB == 0) return std::make_shared<RValue>(RType::LOGICAL);
+        WarnRecycle(op == CmpOp::LT ? "<" : op == CmpOp::GT ? ">" : op == CmpOp::LE ? "<=" : op == CmpOp::GE ? ">=" : op == CmpOp::EQ ? "==" : "!=", lenA, lenB);
+        int N = std::max(lenA, lenB);
+        auto res = std::make_shared<RValue>(RType::LOGICAL);
+        bool both_char = (a->type == RType::CHARACTER && b->type == RType::CHARACTER);
+        for (int i = 0; i < N; ++i) {
+            int ia = i % lenA, ib = i % lenB;
+            if (both_char) {
+                const std::string& sa = a->s_vec[ia];
+                const std::string& sb = b->s_vec[ib];
+                int c = sa.compare(sb);
+                bool r = (op == CmpOp::LT && c < 0) || (op == CmpOp::GT && c > 0) || (op == CmpOp::LE && c <= 0) || (op == CmpOp::GE && c >= 0) || (op == CmpOp::EQ && c == 0) || (op == CmpOp::NE && c != 0);
+                res->i_vec.push_back(r ? 1 : 0);
+            } else {
+                double da = a->GetDouble(ia), db = b->GetDouble(ib);
+                if (std::isnan(da) || std::isnan(db)) { res->i_vec.push_back(R_LOGICAL_NA); continue; }
+                bool r = (op == CmpOp::LT && da < db) || (op == CmpOp::GT && da > db) || (op == CmpOp::LE && da <= db) || (op == CmpOp::GE && da >= db) || (op == CmpOp::EQ && da == db) || (op == CmpOp::NE && da != db);
+                res->i_vec.push_back(r ? 1 : 0);
+            }
+        }
+        return res;
+    }
+    RValuePtr Builtin_Lt(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) { return Builtin_Compare(args, names, env, CmpOp::LT); }
+    RValuePtr Builtin_Gt(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) { return Builtin_Compare(args, names, env, CmpOp::GT); }
+    RValuePtr Builtin_Le(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) { return Builtin_Compare(args, names, env, CmpOp::LE); }
+    RValuePtr Builtin_Ge(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) { return Builtin_Compare(args, names, env, CmpOp::GE); }
+    RValuePtr Builtin_Eq(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) { return Builtin_Compare(args, names, env, CmpOp::EQ); }
+    RValuePtr Builtin_Ne(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) { return Builtin_Compare(args, names, env, CmpOp::NE); }
+
     RValuePtr Builtin_Mod(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
         if (args.size() < 2) return RR_Error("Need 2 args for %%");
         int lenA = args[0]->Length();
@@ -2406,6 +2441,13 @@ namespace Evaluator {
         REG("%%", Builtin_Mod);
         REG("%/%", Builtin_IntDiv);
         REG("%*%", Builtin_MatMult);
+        
+        REG("<", Builtin_Lt);
+        REG(">", Builtin_Gt);
+        REG("<=", Builtin_Le);
+        REG(">=", Builtin_Ge);
+        REG("==", Builtin_Eq);
+        REG("!=", Builtin_Ne);
         
         REG("log", Builtin_Log);
         REG("exp", Builtin_Exp);
