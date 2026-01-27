@@ -2205,17 +2205,18 @@ namespace Evaluator {
                  
                  if (is_na) {
                      if (na_rm) continue;
-                     seen_na = true;
-                     break;
-                 }
+                     if (op == 3 || op == 4) seen_na = true;  // any/all: don't break, keep scanning
+                     else { seen_na = true; break; }
+                 } else {
                  count++;
                  if (op == 0) sum += d;
                  if (op == 1) if (d > max_val) max_val = d;
                  if (op == 2) if (d < min_val) min_val = d;
                  if (op == 3) if (d != 0) any_val = true;
                  if (op == 4) if (d == 0) all_val = false;
+                 }
              }
-             if (seen_na && !na_rm) break;
+             if (seen_na && !na_rm && op != 3 && op != 4) break;
         }
         
         auto res = std::make_shared<RValue>(RType::DOUBLE);
@@ -2232,8 +2233,10 @@ namespace Evaluator {
              else res->d_vec.push_back(min_val);
         } else if (op == 3 || op == 4) {
              res->type = RType::LOGICAL;
-             if (seen_na && !na_rm) res->i_vec.push_back(R_LOGICAL_NA);
-             else res->i_vec.push_back(op == 3 ? (any_val ? 1 : 0) : (all_val ? 1 : 0));
+             // any: TRUE if any TRUE; FALSE if all FALSE; NA only if no TRUE but has NA
+             // all: FALSE if any FALSE; TRUE if all TRUE; NA only if no FALSE but has NA
+             if (op == 3) res->i_vec.push_back(any_val ? 1 : (seen_na ? R_LOGICAL_NA : 0));
+             else res->i_vec.push_back(!all_val ? 0 : (seen_na ? R_LOGICAL_NA : 1));
              res->d_vec.clear();
         }
         
