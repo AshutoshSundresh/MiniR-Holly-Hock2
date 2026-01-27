@@ -256,7 +256,11 @@ namespace Evaluator {
                 if (arg->type == RType::DOUBLE) {
                     res->d_vec.insert(res->d_vec.end(), arg->d_vec.begin(), arg->d_vec.end());
                 } else if (arg->type == RType::INTEGER || arg->type == RType::LOGICAL) {
-                    for (int i = 0; i < arg->Length(); ++i) res->d_vec.push_back(arg->GetDouble(i));
+                    for (int i = 0; i < arg->Length(); ++i) {
+                        if (arg->type == RType::LOGICAL && arg->i_vec[i] == R_LOGICAL_NA) res->d_vec.push_back(NAReal());
+                        else if (arg->type == RType::INTEGER && arg->i_vec[i] == R_INT_NA) res->d_vec.push_back(NAReal());
+                        else res->d_vec.push_back(arg->GetDouble(i));
+                    }
                 }
             }
             return res;
@@ -2296,11 +2300,12 @@ namespace Evaluator {
         }
         std::vector<std::pair<double, int>> paired;
         for (int i = 0; i < n; ++i) paired.push_back({x->GetDouble(i), i});
+        // na.last = TRUE: NA/NaN always at end (for both increasing and decreasing)
         auto cmp = [decreasing](const std::pair<double, int>& a, const std::pair<double, int>& b) {
             bool a_na = std::isnan(a.first), b_na = std::isnan(b.first);
             if (a_na && b_na) return false;
-            if (a_na) return !decreasing;
-            if (b_na) return decreasing;
+            if (a_na) return false;  // a (NA) never "less than" -> NA goes last
+            if (b_na) return true;   // a (number) "less than" NA -> number goes first
             return decreasing ? (a.first > b.first) : (a.first < b.first);
         };
         std::stable_sort(paired.begin(), paired.end(), cmp);
