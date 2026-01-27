@@ -1613,13 +1613,35 @@ namespace Evaluator {
             return res;
         }
         
-        // Vector/List Case: x[i]
+        // Vector/List Case: x[i]  (i can be integer indices or logical mask)
         if (args.size() >= 2) {
             RValuePtr idx = args[1];
             auto res = std::make_shared<RValue>(x->type);
             
-            if (idx->type == RType::NIL) return x; // [] -> x? R usually requires index or empty? x[] is x.
+            if (idx->type == RType::NIL) return x; // [] -> x
             
+            // Logical index: select x[i] where idx[i] is TRUE (recycle idx to length of x)
+            if (idx->type == RType::LOGICAL) {
+                int xlen = x->Length();
+                int ilen = idx->Length();
+                for (int i = 0; i < xlen; ++i) {
+                    int m = (i < ilen) ? idx->i_vec[i] : idx->i_vec[i % ilen];
+                    if (m == R_LOGICAL_NA) {
+                        if (x->type == RType::DOUBLE) res->d_vec.push_back(NAReal());
+                        else if (x->type == RType::INTEGER || x->type == RType::LOGICAL) res->i_vec.push_back(x->type == RType::LOGICAL ? R_LOGICAL_NA : R_INT_NA);
+                        else if (x->type == RType::CHARACTER) res->s_vec.push_back("NA");
+                        else if (x->type == RType::LIST) res->l_vec.push_back(RR_Nil());
+                    } else if (m != 0) { // TRUE
+                        if (x->type == RType::DOUBLE) res->d_vec.push_back(x->d_vec[i]);
+                        else if (x->type == RType::INTEGER || x->type == RType::LOGICAL) res->i_vec.push_back(x->i_vec[i]);
+                        else if (x->type == RType::CHARACTER) res->s_vec.push_back(x->s_vec[i]);
+                        else if (x->type == RType::LIST) res->l_vec.push_back(x->l_vec[i]);
+                    }
+                }
+                return res;
+            }
+            
+            // Integer index: for each index value k, take x[k] (1-based)
             for(int k=0; k<idx->Length(); ++k) {
                 int i = idx->GetInt(k) - 1;
                 if (i >= 0 && i < x->Length()) {
@@ -1629,7 +1651,6 @@ namespace Evaluator {
                      if (x->type == RType::CHARACTER) res->s_vec.push_back(x->s_vec[i]);
                      if (x->type == RType::LIST) res->l_vec.push_back(x->l_vec[i]);
                 } else {
-                    // NA index -> NA in result
                     if (x->type == RType::DOUBLE) res->d_vec.push_back(NAReal());
                     if (x->type == RType::INTEGER) res->i_vec.push_back(R_INT_NA);
                     if (x->type == RType::LOGICAL) res->i_vec.push_back(R_LOGICAL_NA);
