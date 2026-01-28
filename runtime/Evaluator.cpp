@@ -2276,40 +2276,56 @@ namespace Evaluator {
         return res;
     }
 
-    // sort(x, decreasing = FALSE, na.last = NA, ...)
+    // sort(x, decreasing = FALSE, na.last = TRUE, ...)  na.last: TRUE=last, FALSE=first, NA=remove
     RValuePtr Builtin_Sort(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
         if (args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         RValuePtr dec_arg = GetArg(args, names, "decreasing", 1, nullptr);
+        RValuePtr na_last_arg = GetArg(args, names, "na.last", 2, nullptr);
         bool decreasing = dec_arg ? IsTrue(dec_arg) : false;
+        // na.last: 1 = last (default), 0 = first, -1 = remove
+        int na_last = 1;
+        if (na_last_arg && na_last_arg->Length() > 0) {
+            if (na_last_arg->type == RType::LOGICAL && na_last_arg->i_vec[0] == R_LOGICAL_NA) na_last = -1;
+            else if (na_last_arg->type == RType::INTEGER && na_last_arg->i_vec[0] == R_INT_NA) na_last = -1;
+            else if (na_last_arg->type == RType::DOUBLE && std::isnan(na_last_arg->GetDouble(0))) na_last = -1;
+            else na_last = IsTrue(na_last_arg) ? 1 : 0;
+        }
         int n = x->Length();
         auto res = std::make_shared<RValue>(x->type);
         if (x->type == RType::CHARACTER) {
             std::vector<std::pair<std::string, int>> paired;
             for (int i = 0; i < n; ++i) paired.push_back({x->s_vec[i], i});
-            auto cmp = [decreasing](const std::pair<std::string, int>& a, const std::pair<std::string, int>& b) {
+            bool na_at_end = (na_last == 1);
+            auto cmp = [decreasing, na_at_end](const std::pair<std::string, int>& a, const std::pair<std::string, int>& b) {
                 bool a_na = (a.first.empty() || a.first == "NA"), b_na = (b.first.empty() || b.first == "NA");
                 if (a_na && b_na) return false;
-                if (a_na) return !decreasing;
-                if (b_na) return decreasing;
+                if (a_na) return !na_at_end;   // a "less than" b only when we want NA first
+                if (b_na) return na_at_end;    // a "less than" b (NA) when we want NA last
                 return decreasing ? (a.first > b.first) : (a.first < b.first);
             };
             std::stable_sort(paired.begin(), paired.end(), cmp);
-            for (int i = 0; i < n; ++i) res->s_vec.push_back(x->s_vec[paired[i].second]);
+            for (int i = 0; i < n; ++i) {
+                if (na_last == -1 && (paired[i].first.empty() || paired[i].first == "NA")) continue;
+                res->s_vec.push_back(x->s_vec[paired[i].second]);
+            }
             return res;
         }
         std::vector<std::pair<double, int>> paired;
         for (int i = 0; i < n; ++i) paired.push_back({x->GetDouble(i), i});
-        // na.last = TRUE: NA/NaN always at end (for both increasing and decreasing)
-        auto cmp = [decreasing](const std::pair<double, int>& a, const std::pair<double, int>& b) {
+        if (na_last == -1) {
+            paired.erase(std::remove_if(paired.begin(), paired.end(), [](const std::pair<double, int>& p) { return std::isnan(p.first); }), paired.end());
+        }
+        bool na_at_end = (na_last == 1);
+        auto cmp = [decreasing, na_at_end](const std::pair<double, int>& a, const std::pair<double, int>& b) {
             bool a_na = std::isnan(a.first), b_na = std::isnan(b.first);
             if (a_na && b_na) return false;
-            if (a_na) return false;  // a (NA) never "less than" -> NA goes last
-            if (b_na) return true;   // a (number) "less than" NA -> number goes first
+            if (a_na) return !na_at_end;  // a "less than" b only when we want NA first
+            if (b_na) return na_at_end;    // a "less than" b (NA) when we want NA last
             return decreasing ? (a.first > b.first) : (a.first < b.first);
         };
         std::stable_sort(paired.begin(), paired.end(), cmp);
-        for (int i = 0; i < n; ++i) {
+        for (size_t i = 0; i < paired.size(); ++i) {
             int idx = paired[i].second;
             if (x->type == RType::DOUBLE) res->d_vec.push_back(x->d_vec[idx]);
             else if (x->type == RType::INTEGER) res->i_vec.push_back(x->i_vec[idx]);
@@ -2341,10 +2357,14 @@ namespace Evaluator {
         return res;
     }
 
-    // rank(x, na.last = TRUE, ties.method = "average")
+    // rank(x, na.last = TRUE, ties.method = "average")  ties.method: "average", "min", "max", "first"
     RValuePtr Builtin_Rank(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
         if (args.empty()) return RR_Nil();
         RValuePtr x = args[0];
+        RValuePtr ties_arg = GetArg(args, names, "ties.method", 2, nullptr);
+        std::string ties_method = "average";
+        if (ties_arg && ties_arg->type == RType::CHARACTER && ties_arg->Length() > 0)
+            ties_method = ties_arg->s_vec[0];
         int n = x->Length();
         std::vector<std::pair<double, int>> paired;
         for (int i = 0; i < n; ++i) paired.push_back({x->GetDouble(i), i});
@@ -2364,8 +2384,18 @@ namespace Evaluator {
             }
             int j = i;
             while (j + 1 < n && !std::isnan(paired[j+1].first) && paired[j+1].first == paired[i].first) ++j;
-            double avg_rank = (i + j + 2) / 2.0; // 1-based average
-            for (int k = i; k <= j; ++k) res->d_vec[paired[k].second] = avg_rank;
+            double rank_val;
+            if (ties_method == "min" || ties_method == "first")
+                rank_val = i + 1;  // 1-based minimum rank
+            else if (ties_method == "max")
+                rank_val = j + 1;
+            else
+                rank_val = (i + j + 2) / 2.0;  // average
+            if (ties_method == "first") {
+                for (int k = i; k <= j; ++k) res->d_vec[paired[k].second] = (k - i) + (i + 1);
+            } else {
+                for (int k = i; k <= j; ++k) res->d_vec[paired[k].second] = rank_val;
+            }
             i = j;
         }
         return res;
