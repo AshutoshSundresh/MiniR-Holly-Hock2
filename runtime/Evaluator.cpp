@@ -8,6 +8,7 @@
 #include <set>
 #include <cstdint>
 #include <cstring>
+#include <cctype>
 #include <limits>
 
 namespace Evaluator {
@@ -68,6 +69,16 @@ namespace Evaluator {
             double d = v->d_vec[i];
             if (std::isnan(d)) return R_LOGICAL_NA;
             return d == 0.0 ? 0 : 1;
+        }
+        if (v->type == RType::CHARACTER) {
+            if (i < 0 || i >= (int)v->s_vec.size()) return 0;
+            std::string s = v->s_vec[i];
+            for (char& ch : s) ch = (char)std::toupper((unsigned char)ch);
+            if (s == "TRUE" || s == "T") return 1;
+            if (s == "FALSE" || s == "F") return 0;
+            if (s == "NA") return R_LOGICAL_NA;
+            // R: unrecognized strings -> NA
+            return R_LOGICAL_NA;
         }
         // For this MiniR subset, treat other types as FALSE.
         return 0;
