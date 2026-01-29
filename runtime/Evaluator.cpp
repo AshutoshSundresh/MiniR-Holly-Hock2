@@ -2286,6 +2286,75 @@ namespace Evaluator {
         if (args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         if (x->attributes.count("dim")) return x; // already matrix?
+
+        // data.frame -> matrix: coerce columns to common type and bind as columns
+        if (x->type == RType::LIST && HasClass(x, "data.frame")) {
+            int nc = (int)x->l_vec.size();
+            int nr = (nc > 0 && x->l_vec[0]) ? x->l_vec[0]->Length() : 0;
+
+            bool any_char = false;
+            bool any_double = false;
+            for (int c = 0; c < nc; ++c) {
+                if (!x->l_vec[c]) continue;
+                any_char |= (x->l_vec[c]->type == RType::CHARACTER);
+                any_double |= (x->l_vec[c]->type == RType::DOUBLE);
+            }
+
+            if (any_char) {
+                auto res = std::make_shared<RValue>(RType::CHARACTER);
+                res->s_vec.resize(nr * nc);
+                for (int c = 0; c < nc; ++c) {
+                    RValuePtr col = x->l_vec[c];
+                    for (int r = 0; r < nr; ++r) {
+                        std::string out = "NA";
+                        if (!col || r >= col->Length()) out = "NA";
+                        else if (col->type == RType::CHARACTER) out = col->s_vec[r];
+                        else if (col->type == RType::INTEGER) out = (col->i_vec[r] == R_INT_NA) ? "NA" : std::to_string(col->i_vec[r]);
+                        else if (col->type == RType::LOGICAL) {
+                            int v = col->i_vec[r];
+                            out = (v == R_LOGICAL_NA) ? "NA" : (v ? "TRUE" : "FALSE");
+                        } else if (col->type == RType::DOUBLE) {
+                            double d = col->d_vec[r];
+                            if (IsNAReal(d)) out = "NA";
+                            else if (std::isnan(d)) out = "NaN";
+                            else {
+                                std::ostringstream oss;
+                                oss.setf(std::ios::fmtflags(0), std::ios::floatfield);
+                                oss << std::setprecision(7) << d;
+                                out = oss.str();
+                            }
+                        }
+                        res->s_vec[c * nr + r] = out; // column-major
+                    }
+                }
+                auto dim = std::make_shared<RValue>(RType::INTEGER);
+                dim->i_vec = {nr, nc};
+                res->attributes["dim"] = dim;
+                return res;
+            }
+
+            // numeric matrix: DOUBLE (also coerces logical to 1/0)
+            auto res = std::make_shared<RValue>(RType::DOUBLE);
+            res->d_vec.resize(nr * nc);
+            for (int c = 0; c < nc; ++c) {
+                RValuePtr col = x->l_vec[c];
+                for (int r = 0; r < nr; ++r) {
+                    double out = NAReal();
+                    if (!col || r >= col->Length()) out = NAReal();
+                    else if (col->type == RType::DOUBLE) out = col->d_vec[r];
+                    else if (col->type == RType::INTEGER) out = (col->i_vec[r] == R_INT_NA) ? NAReal() : (double)col->i_vec[r];
+                    else if (col->type == RType::LOGICAL) {
+                        int v = col->i_vec[r];
+                        out = (v == R_LOGICAL_NA) ? NAReal() : (v ? 1.0 : 0.0);
+                    } else out = col->GetDouble(r);
+                    res->d_vec[c * nr + r] = out; // column-major
+                }
+            }
+            auto dim = std::make_shared<RValue>(RType::INTEGER);
+            dim->i_vec = {nr, nc};
+            res->attributes["dim"] = dim;
+            return res;
+        }
         
         // Wrap with dim
         // Copy x
