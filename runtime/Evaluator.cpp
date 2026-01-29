@@ -21,6 +21,19 @@ namespace Evaluator {
         return false;
     }
 
+    // Helper: Does object have a given S3 class?
+    static bool HasClass(RValuePtr v, const std::string& cls) {
+        if (!v) return false;
+        auto it = v->attributes.find("class");
+        if (it == v->attributes.end()) return false;
+        RValuePtr c = it->second;
+        if (!c || c->type != RType::CHARACTER) return false;
+        for (const auto& s : c->s_vec) {
+            if (s == cls) return true;
+        }
+        return false;
+    }
+
     // R-style logical scalar encoding: 1=TRUE, 0=FALSE, -1=NA
     // NA_real_ in R is a specific NaN payload. We'll emulate that so we can
     // distinguish NA from plain NaN when printing.
@@ -1576,6 +1589,67 @@ namespace Evaluator {
         if (args.empty()) return RR_Error("Empty subset");
         RValuePtr x = args[0];
         
+        // --- data.frame subsetting ---
+        if (x->type == RType::LIST && HasClass(x, "data.frame")) {
+            // df["Height"], df[2]
+            if (args.size() == 2) {
+                RValuePtr col_idx = args[1];
+                std::vector<int> cols;
+                RValuePtr names_attr = x->attributes.count("names") ? x->attributes["names"] : RR_Nil();
+
+                if (col_idx->type == RType::CHARACTER && names_attr && names_attr->type == RType::CHARACTER) {
+                    for (int k = 0; k < col_idx->Length(); ++k) {
+                        const std::string &key = col_idx->s_vec[k];
+                        bool found = false;
+                        for (size_t j = 0; j < x->l_vec.size() && j < (size_t)names_attr->Length(); ++j) {
+                            if (names_attr->s_vec[j] == key) { cols.push_back((int)j); found = true; break; }
+                        }
+                        if (!found) return RR_Error("Subscript out of bounds");
+                    }
+                } else if (col_idx->type == RType::INTEGER || col_idx->type == RType::DOUBLE) {
+                    for (int k = 0; k < col_idx->Length(); ++k) {
+                        int j = col_idx->GetInt(k) - 1;
+                        if (j < 0 || j >= (int)x->l_vec.size()) return RR_Error("Subscript out of bounds");
+                        cols.push_back(j);
+                    }
+                } else {
+                    return RR_Error("Unsupported column index for data.frame");
+                }
+
+                auto res = std::make_shared<RValue>(RType::LIST);
+                for (int j : cols) res->l_vec.push_back(x->l_vec[j]);
+                // copy attributes
+                res->attributes = x->attributes;
+                if (names_attr && names_attr->type == RType::CHARACTER) {
+                    auto new_names = std::make_shared<RValue>(RType::CHARACTER);
+                    for (int j : cols) new_names->s_vec.push_back(names_attr->s_vec[j]);
+                    res->attributes["names"] = new_names;
+                }
+                return res;
+            }
+
+            // df[, "Height"] or df[, 2]  (ignore rows for now, full row set)
+            if (args.size() >= 3) {
+                RValuePtr rows = args[1];
+                (void)rows; // full rows for now
+                RValuePtr cols_arg = args[2];
+                int j = -1;
+                RValuePtr names_attr = x->attributes.count("names") ? x->attributes["names"] : RR_Nil();
+                if (cols_arg->type == RType::CHARACTER && cols_arg->Length() > 0 &&
+                    names_attr && names_attr->type == RType::CHARACTER) {
+                    std::string key = cols_arg->s_vec[0];
+                    for (size_t k = 0; k < x->l_vec.size() && k < (size_t)names_attr->Length(); ++k) {
+                        if (names_attr->s_vec[k] == key) { j = (int)k; break; }
+                    }
+                } else if ((cols_arg->type == RType::INTEGER || cols_arg->type == RType::DOUBLE) && cols_arg->Length() > 0) {
+                    j = cols_arg->GetInt(0) - 1;
+                }
+                if (j < 0 || j >= (int)x->l_vec.size()) return RR_Error("Subscript out of bounds");
+                // return the column vector directly
+                return x->l_vec[j];
+            }
+        }
+        
         // Matrix Case: x[i, j] -> 3 args (x, i, j)
         // If x has dim, treat as matrix if 2 indices provided or explicit matrix subset
         if (x->attributes.count("dim") && args.size() >= 3) {
@@ -1686,6 +1760,22 @@ namespace Evaluator {
         if (args.size() < 2) return RR_Error("Need index for [[");
         RValuePtr x = args[0];
         RValuePtr idx = args[1];
+
+        // Name-based extraction for list/data.frame: x[["name"]]
+        if ((idx->type == RType::CHARACTER || idx->type == RType::SYMBOL) &&
+            x->type == RType::LIST && x->attributes.count("names")) {
+            std::string key;
+            if (idx->type == RType::SYMBOL) key = idx->sym_name;
+            else if (idx->type == RType::CHARACTER && idx->Length() > 0) key = idx->s_vec[0];
+            RValuePtr names_attr = x->attributes["names"];
+            if (names_attr && names_attr->type == RType::CHARACTER) {
+                for (size_t j = 0; j < x->l_vec.size() && j < (size_t)names_attr->Length(); ++j) {
+                    if (names_attr->s_vec[j] == key) return x->l_vec[j];
+                }
+            }
+            return RR_Error("Subscript out of bounds");
+        }
+
         int raw = idx->GetInt(0);
         if (raw == R_INT_NA) {
             // R: x[[NA_integer_]] returns NA (atomic) or NULL (list)
@@ -1709,19 +1799,31 @@ namespace Evaluator {
 
     RValuePtr Builtin_NRow(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
          if (args.empty()) return RR_Nil();
-         if (args[0]->attributes.count("dim")) {
+         RValuePtr x = args[0];
+         if (x->attributes.count("dim")) {
              auto r = std::make_shared<RValue>(RType::INTEGER);
-             r->i_vec.push_back(args[0]->attributes["dim"]->GetInt(0));
+             r->i_vec.push_back(x->attributes["dim"]->GetInt(0));
+             return r;
+         }
+         if (x->type == RType::LIST && HasClass(x, "data.frame") && !x->l_vec.empty()) {
+             auto r = std::make_shared<RValue>(RType::INTEGER);
+             r->i_vec.push_back(x->l_vec[0]->Length());
              return r;
          }
          return RR_Nil();
     }
-
+    
     RValuePtr Builtin_NCol(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
          if (args.empty()) return RR_Nil();
-         if (args[0]->attributes.count("dim")) {
+         RValuePtr x = args[0];
+         if (x->attributes.count("dim")) {
              auto r = std::make_shared<RValue>(RType::INTEGER);
-             r->i_vec.push_back(args[0]->attributes["dim"]->GetInt(1));
+             r->i_vec.push_back(x->attributes["dim"]->GetInt(1));
+             return r;
+         }
+         if (x->type == RType::LIST && HasClass(x, "data.frame")) {
+             auto r = std::make_shared<RValue>(RType::INTEGER);
+             r->i_vec.push_back((int)x->l_vec.size());
              return r;
          }
          return RR_Nil();
@@ -2870,6 +2972,40 @@ namespace Evaluator {
         };
 
         std::string s = "";
+        
+        // data.frame: pretty print like a simple 2D table
+        if (v->type == RType::LIST && HasClass(v, "data.frame")) {
+            int ncol = (int)v->l_vec.size();
+            int nrow = ncol > 0 ? v->l_vec[0]->Length() : 0;
+            RValuePtr names_attr = v->attributes.count("names") ? v->attributes["names"] : RR_Nil();
+
+            // Header
+            s += "  ";
+            for (int j = 0; j < ncol; ++j) {
+                if (j) s += " ";
+                if (names_attr && names_attr->type == RType::CHARACTER && j < names_attr->Length())
+                    s += names_attr->s_vec[j];
+                else
+                    s += "V" + std::to_string(j+1);
+            }
+            s += "\n";
+
+            // Rows
+            for (int i = 0; i < nrow; ++i) {
+                s += std::to_string(i+1) + " ";
+                for (int j = 0; j < ncol; ++j) {
+                    if (j) s += " ";
+                    RValuePtr col = v->l_vec[j];
+                    if (col->type == RType::DOUBLE) s += fmtDouble(col->GetDouble(i));
+                    else if (col->type == RType::INTEGER) s += fmtInt(col->GetInt(i));
+                    else if (col->type == RType::LOGICAL) s += fmtLgl(col->GetInt(i));
+                    else if (col->type == RType::CHARACTER && i < col->Length()) s += "\"" + col->s_vec[i] + "\"";
+                    else s += "NA";
+                }
+                s += "\n";
+            }
+            return s;
+        }
         
         // Matrix: print as rows x cols when dim is 2D
         if ((v->type == RType::DOUBLE || v->type == RType::INTEGER || v->type == RType::LOGICAL || v->type == RType::CHARACTER)
