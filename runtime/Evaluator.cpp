@@ -1578,7 +1578,7 @@ namespace Evaluator {
             
             // Row indices: -1 means NA (output NA), else 0-based valid index
             std::vector<int> r_idx;
-            if (rows->type == RType::NIL) {
+            if (rows->type == RType::NIL || rows->Length() == 0) {
                 for(int i=0; i<nr; ++i) r_idx.push_back(i);
             } else {
                 for(int k=0; k<rows->Length(); ++k) {
@@ -1589,7 +1589,7 @@ namespace Evaluator {
                 }
             }
             std::vector<int> c_idx;
-            if (cols->type == RType::NIL) {
+            if (cols->type == RType::NIL || cols->Length() == 0) {
                 for(int i=0; i<nc; ++i) c_idx.push_back(i);
             } else {
                 for(int k=0; k<cols->Length(); ++k) {
@@ -2826,9 +2826,36 @@ namespace Evaluator {
 
         std::string s = "";
         
-        // Prefix with [1] if vector?
+        // Matrix: print as rows x cols when dim is 2D
+        if ((v->type == RType::DOUBLE || v->type == RType::INTEGER || v->type == RType::LOGICAL || v->type == RType::CHARACTER)
+            && v->attributes.count("dim")) {
+            RValuePtr dim = v->attributes["dim"];
+            if (dim->Length() >= 2) {
+                int nr = dim->GetInt(0), nc = dim->GetInt(1);
+                if (nr > 0 && nc > 0 && nr * nc == v->Length()) {
+                    for (int r = 0; r < nr; ++r) {
+                        s += "[" + std::to_string(r+1) + ",] ";
+                        for (int c = 0; c < nc; ++c) {
+                            int flat = c * nr + r;
+                            if (c > 0) s += " ";
+                            if (v->type == RType::DOUBLE) s += fmtDouble(v->d_vec[flat]);
+                            else if (v->type == RType::INTEGER) s += fmtInt(v->i_vec[flat]);
+                            else if (v->type == RType::LOGICAL) s += fmtLgl(v->i_vec[flat]);
+                            else if (v->type == RType::CHARACTER) s += "\"" + v->s_vec[flat] + "\"";
+                        }
+                        s += "\n";
+                    }
+                    // Header row: [,1] [,2] ...
+                    std::string header = "     ";
+                    for (int c = 0; c < nc; ++c) { if (c) header += " "; header += "[," + std::to_string(c+1) + "]"; }
+                    s = header + "\n" + s;
+                    return s;
+                }
+            }
+        }
+        
+        // Vector: prefix [1] and space-separated
         if (v->type == RType::DOUBLE || v->type == RType::INTEGER || v->type == RType::LOGICAL || v->type == RType::CHARACTER) {
-            // Simple Print
              s += "[1] ";
              for(int i=0; i<v->Length(); ++i) {
                  if (i > 0) s += " ";

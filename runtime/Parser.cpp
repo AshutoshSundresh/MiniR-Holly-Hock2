@@ -108,16 +108,24 @@ RValuePtr Parser::ParseExpression(int precedence) {
             call->l_vec.back()->sym_name = (op.type == TokenType::lbracket) ? "[" : "[[";
             call->l_vec.push_back(left);
             
-            // Parse indices
-            while (!Check(op.type == TokenType::lbracket ? TokenType::rbracket : TokenType::dbl_rbracket) && !Check(TokenType::eof)) {
+            // Parse indices: allow leading comma M[,2] and trailing comma M[1,]
+            TokenType closing = (op.type == TokenType::lbracket) ? TokenType::rbracket : TokenType::dbl_rbracket;
+            while (!Check(closing) && !Check(TokenType::eof)) {
                 if (Check(TokenType::comma)) {
-                    // Empty argument (missing index) -> Symbol("") or implicit?
-                    // R: [1, ] is 1, missing.
-                    call->l_vec.push_back(std::make_shared<RValue>(RType::NIL)); // Gap
+                    // Leading comma: push NIL for missing arg, advance past comma
+                    call->l_vec.push_back(RR_Nil());
+                    Advance();
+                    // If next is closing bracket, we're done (trailing comma case handled below)
+                    if (Check(closing)) break;
+                    // Otherwise continue loop to parse next expression
                 } else {
+                    // Parse expression
                     call->l_vec.push_back(ParseExpression());
+                    // Check for comma after expression
+                    if (!Match(TokenType::comma)) break;
+                    // If comma followed by closing bracket, push NIL for trailing arg
+                    if (Check(closing)) { call->l_vec.push_back(RR_Nil()); break; }
                 }
-                if (!Match(TokenType::comma)) break;
             }
             Consume(op.type == TokenType::lbracket ? TokenType::rbracket : TokenType::dbl_rbracket, "Expect closing bracket");
             left = call;
