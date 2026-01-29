@@ -440,6 +440,10 @@ namespace Evaluator {
         WarnRecycle(op == CmpOp::LT ? "<" : op == CmpOp::GT ? ">" : op == CmpOp::LE ? "<=" : op == CmpOp::GE ? ">=" : op == CmpOp::EQ ? "==" : "!=", lenA, lenB);
         int N = std::max(lenA, lenB);
         auto res = std::make_shared<RValue>(RType::LOGICAL);
+        // Preserve dim attribute from first argument (if matrix, result is also matrix)
+        if (a->attributes.count("dim")) {
+            res->attributes["dim"] = a->attributes["dim"];
+        }
         bool both_char = (a->type == RType::CHARACTER && b->type == RType::CHARACTER);
         for (int i = 0; i < N; ++i) {
             int ia = i % lenA, ib = i % lenB;
@@ -1501,6 +1505,8 @@ namespace Evaluator {
         RValuePtr data = GetArg(args, names, "data", 0);
         RValuePtr nrow_arg = GetArg(args, names, "nrow", 1);
         RValuePtr ncol_arg = GetArg(args, names, "ncol", 2);
+        RValuePtr byrow_arg = GetArg(args, names, "byrow", 3, nullptr);
+        bool byrow = byrow_arg ? IsTrue(byrow_arg) : false;
         
         // Data defaults
         if (!data) { 
@@ -1527,12 +1533,21 @@ namespace Evaluator {
         int total = nr * nc;
         res->d_vec.resize(total);
         
-        // Fill Column Major (default)
-        // Todo: support byrow
         int dlen = data->Length();
         if (dlen == 0) {
             for (int i = 0; i < total; ++i) res->d_vec[i] = NAReal(); // NA_real_
+        } else if (byrow) {
+            // Fill row-by-row from data, but store column-major (R's storage is always column-major)
+            // Position (r,c) in matrix is stored at index c*nr + r
+            int idx = 0;
+            for (int r = 0; r < nr; ++r) {
+                for (int c = 0; c < nc; ++c) {
+                    res->d_vec[c * nr + r] = data->GetDouble(idx % dlen);
+                    idx++;
+                }
+            }
         } else {
+            // Fill Column Major (default): flat = c * nr + r
             for (int i = 0; i < total; ++i)
                 res->d_vec[i] = data->GetDouble(i % dlen); // Recycle
         }
@@ -1793,19 +1808,49 @@ namespace Evaluator {
 
     // --- INDEXING & PARALLEL ---
 
-    // which(x, arr.ind=FALSE) - Simplified: just flat indices
+    // which(x, arr.ind=FALSE) - Returns flat indices, or matrix of (row,col) if arr.ind=TRUE
     RValuePtr Builtin_Which(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         RValuePtr x = args[0];
-        // arr.ind todo
+        RValuePtr arr_ind_arg = GetArg(args, names, "arr.ind", 1, nullptr);
+        bool arr_ind = arr_ind_arg ? IsTrue(arr_ind_arg) : false;
         
-        auto res = std::make_shared<RValue>(RType::INTEGER);
+        // Collect indices where TRUE
+        std::vector<int> true_indices;
         for(int i=0; i<x->Length(); ++i) {
             int lv = AsLogicalAt(x, i);
             if (lv == 1) { // TRUE; NA treated as FALSE, like R
-                 res->i_vec.push_back(i + 1); // 1-based
+                 true_indices.push_back(i);
             }
         }
+        
+        if (arr_ind && x->attributes.count("dim")) {
+            RValuePtr dim = x->attributes["dim"];
+            if (dim->Length() >= 2) {
+                int nr = dim->GetInt(0), nc = dim->GetInt(1);
+                // Return matrix: n rows (one per TRUE), 2 cols (row, col indices, 1-based)
+                // Column-major storage: push all row indices, then all col indices
+                auto res = std::make_shared<RValue>(RType::INTEGER);
+                std::vector<int> rows, cols;
+                for (int flat : true_indices) {
+                    int r = (flat % nr) + 1;  // 1-based row
+                    int c = (flat / nr) + 1;  // 1-based col
+                    rows.push_back(r);
+                    cols.push_back(c);
+                }
+                // Column-major: column 0 (all rows), then column 1 (all cols)
+                for (int r : rows) res->i_vec.push_back(r);
+                for (int c : cols) res->i_vec.push_back(c);
+                auto new_dim = std::make_shared<RValue>(RType::INTEGER);
+                new_dim->i_vec = {(int)true_indices.size(), 2};
+                res->attributes["dim"] = new_dim;
+                return res;
+            }
+        }
+        
+        // Default: flat indices (1-based)
+        auto res = std::make_shared<RValue>(RType::INTEGER);
+        for (int i : true_indices) res->i_vec.push_back(i + 1);
         return res;
     }
     
