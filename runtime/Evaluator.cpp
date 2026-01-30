@@ -322,6 +322,7 @@ namespace Evaluator {
         if (AnyDouble(args[0], args[1])) {
             auto res = std::make_shared<RValue>(RType::DOUBLE);
             res->d_vec.resize(N);
+            if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
             for (int i = 0; i < N; ++i) {
                 double a = args[0]->GetDouble(i % lenA);
                 double b = args[1]->GetDouble(i % lenB);
@@ -331,6 +332,7 @@ namespace Evaluator {
         }
         auto res = std::make_shared<RValue>(RType::INTEGER);
         res->i_vec.resize(N);
+        if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
         for (int i = 0; i < N; ++i) {
             int a = args[0]->GetInt(i % lenA);
             int b = args[1]->GetInt(i % lenB);
@@ -372,6 +374,7 @@ namespace Evaluator {
          if (AnyDouble(args[0], args[1])) {
              auto res = std::make_shared<RValue>(RType::DOUBLE);
              res->d_vec.resize(N);
+             if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
              for (int i = 0; i < N; ++i) {
                  double a = args[0]->GetDouble(i % lenA);
                  double b = args[1]->GetDouble(i % lenB);
@@ -381,6 +384,7 @@ namespace Evaluator {
          }
          auto res = std::make_shared<RValue>(RType::INTEGER);
          res->i_vec.resize(N);
+         if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
          for (int i = 0; i < N; ++i) {
              int a = args[0]->GetInt(i % lenA);
              int b = args[1]->GetInt(i % lenB);
@@ -402,6 +406,7 @@ namespace Evaluator {
          if (AnyDouble(args[0], args[1])) {
              auto res = std::make_shared<RValue>(RType::DOUBLE);
              res->d_vec.resize(N);
+             if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
              for (int i = 0; i < N; ++i) {
                  double a = args[0]->GetDouble(i % lenA);
                  double b = args[1]->GetDouble(i % lenB);
@@ -411,6 +416,7 @@ namespace Evaluator {
          }
          auto res = std::make_shared<RValue>(RType::INTEGER);
          res->i_vec.resize(N);
+         if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
          for (int i = 0; i < N; ++i) {
              int a = args[0]->GetInt(i % lenA);
              int b = args[1]->GetInt(i % lenB);
@@ -429,6 +435,7 @@ namespace Evaluator {
         int N = std::max(lenA, lenB);
         auto res = std::make_shared<RValue>(RType::DOUBLE);
         res->d_vec.resize(N);
+        if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
         for (int i = 0; i < N; ++i) {
             double a = args[0]->GetDouble(i % lenA);
             double b = args[1]->GetDouble(i % lenB);
@@ -446,6 +453,7 @@ namespace Evaluator {
         int N = std::max(lenA, lenB);
         auto res = std::make_shared<RValue>(RType::DOUBLE);
         res->d_vec.resize(N);
+        if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
         for (int i = 0; i < N; ++i) {
             double a = args[0]->GetDouble(i % lenA);
             double b = args[1]->GetDouble(i % lenB);
@@ -506,6 +514,7 @@ namespace Evaluator {
         if (!AnyDouble(args[0], args[1]) && IsIntLike(args[0]) && IsIntLike(args[1])) {
             auto res = std::make_shared<RValue>(RType::INTEGER);
             res->i_vec.resize(N);
+            if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
             for (int i = 0; i < N; ++i) {
                 int a = args[0]->GetInt(i % lenA);
                 int b = args[1]->GetInt(i % lenB);
@@ -517,6 +526,7 @@ namespace Evaluator {
         }
         auto res = std::make_shared<RValue>(RType::DOUBLE);
         res->d_vec.resize(N);
+        if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
         for (int i = 0; i < N; ++i) {
             double a = args[0]->GetDouble(i % lenA);
             double b = args[1]->GetDouble(i % lenB);
@@ -537,6 +547,7 @@ namespace Evaluator {
         if (!AnyDouble(args[0], args[1]) && IsIntLike(args[0]) && IsIntLike(args[1])) {
             auto res = std::make_shared<RValue>(RType::INTEGER);
             res->i_vec.resize(N);
+            if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
             for (int i = 0; i < N; ++i) {
                 int a = args[0]->GetInt(i % lenA);
                 int b = args[1]->GetInt(i % lenB);
@@ -548,6 +559,7 @@ namespace Evaluator {
         }
         auto res = std::make_shared<RValue>(RType::DOUBLE);
         res->d_vec.resize(N);
+        if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
         for (int i = 0; i < N; ++i) {
             double a = args[0]->GetDouble(i % lenA);
             double b = args[1]->GetDouble(i % lenB);
