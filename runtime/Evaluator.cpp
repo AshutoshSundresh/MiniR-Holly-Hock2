@@ -984,6 +984,58 @@ namespace Evaluator {
         return res;
     }
     
+    // duplicated(x, fromLast = FALSE) – logical vector, TRUE for elements that have appeared before
+    RValuePtr Builtin_Duplicated(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+        if (args.empty()) return RR_Nil();
+        RValuePtr x = args[0];
+        RValuePtr fromLast_arg = GetArg(args, names, "fromLast", 1, nullptr);
+        bool from_last = fromLast_arg ? IsTrue(fromLast_arg) : false;
+
+        auto res = std::make_shared<RValue>(RType::LOGICAL);
+        int n = x->Length();
+        res->i_vec.resize(n);
+
+        std::set<double> seen_d;
+        std::set<int> seen_i;
+        std::set<std::string> seen_s;
+        bool seen_na_double = false;
+        bool seen_na_int = false;
+
+        auto mark = [&](int i) {
+            if (x->type == RType::DOUBLE) {
+                double v = x->d_vec[i];
+                if (std::isnan(v)) {
+                    if (seen_na_double) res->i_vec[i] = 1;
+                    else { seen_na_double = true; res->i_vec[i] = 0; }
+                } else {
+                    if (seen_d.find(v) != seen_d.end()) res->i_vec[i] = 1;
+                    else { seen_d.insert(v); res->i_vec[i] = 0; }
+                }
+            } else if (x->type == RType::CHARACTER) {
+                const std::string& v = x->s_vec[i];
+                if (seen_s.find(v) != seen_s.end()) res->i_vec[i] = 1;
+                else { seen_s.insert(v); res->i_vec[i] = 0; }
+            } else { // INTEGER or LOGICAL
+                int v = x->i_vec[i];
+                bool is_na = (v == R_INT_NA || v == R_LOGICAL_NA);
+                if (is_na) {
+                    if (seen_na_int) res->i_vec[i] = 1;
+                    else { seen_na_int = true; res->i_vec[i] = 0; }
+                } else {
+                    if (seen_i.find(v) != seen_i.end()) res->i_vec[i] = 1;
+                    else { seen_i.insert(v); res->i_vec[i] = 0; }
+                }
+            }
+        };
+
+        if (!from_last) {
+            for (int i = 0; i < n; ++i) mark(i);
+        } else {
+            for (int i = n - 1; i >= 0; --i) mark(i);
+        }
+        return res;
+    }
+    
     // cumsum(x)
     RValuePtr Builtin_Cumsum(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
         if (args.empty()) return RR_Nil();
@@ -2799,6 +2851,7 @@ namespace Evaluator {
         
         REG("ifelse", Builtin_IfElse);
         REG("unique", Builtin_Unique);
+        REG("duplicated", Builtin_Duplicated);
         REG("cumsum", Builtin_Cumsum);
         
         REG("is.numeric", Builtin_IsNumeric);
