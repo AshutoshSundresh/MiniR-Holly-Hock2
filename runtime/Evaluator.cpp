@@ -23,7 +23,7 @@ namespace Evaluator {
     }
 
     // Helper: Does object have a given S3 class?
-    static bool HasClass(RValuePtr v, const std::string& cls) {
+    static bool HasClass(RValuePtr v, const MiniString& cls) {
         if (!v) return false;
         auto it = v->attributes.find("class");
         if (it == v->attributes.end()) return false;
@@ -72,8 +72,11 @@ namespace Evaluator {
         }
         if (v->type == RType::CHARACTER) {
             if (i < 0 || i >= (int)v->s_vec.size()) return 0;
-            std::string s = v->s_vec[i];
-            for (char& ch : s) ch = (char)std::toupper((unsigned char)ch);
+            MiniString s = v->s_vec[i];
+            for (std::size_t idx = 0; idx < s.size(); ++idx) {
+                char ch = s[idx];
+                s[idx] = (char)std::toupper((unsigned char)ch);
+            }
             if (s == "TRUE" || s == "T") return 1;
             if (s == "FALSE" || s == "F") return 0;
             if (s == "NA") return R_LOGICAL_NA;
@@ -84,7 +87,7 @@ namespace Evaluator {
         return 0;
     }
 
-    bool ConditionToBoolOrError(RValuePtr cond, std::string& err) {
+    bool ConditionToBoolOrError(RValuePtr cond, MiniString& err) {
         if (!cond) { err = "argument is of length zero"; return false; }
         if (cond->Length() == 0) { err = "argument is of length zero"; return false; }
         if (cond->Length() != 1) { err = "the condition has length > 1"; return false; }
@@ -114,7 +117,7 @@ namespace Evaluator {
         return (int32_t)x;
     }
 
-    RValuePtr Lookup(const std::string& name, RValuePtr env) {
+    RValuePtr Lookup(const MiniString& name, RValuePtr env) {
         // Simple search up parent chain
         RValuePtr cur = env;
         while (cur) {
@@ -122,10 +125,13 @@ namespace Evaluator {
             if (it != cur->frame.end()) return it->second;
             cur = cur->parent_env;
         }
-        return RR_Error("Object '" + name + "' not found");
+        MiniString msg("Object '");
+        msg += name;
+        msg += "' not found";
+        return RR_Error(msg);
     }
 
-    void Define(const std::string& name, RValuePtr val, RValuePtr env) {
+    void Define(const MiniString& name, RValuePtr val, RValuePtr env) {
         if (env) env->frame[name] = val;
     }
 
@@ -134,8 +140,8 @@ namespace Evaluator {
     // Logic: Look for exact name match in arg_names.
     // If not found, look for positional (index pos) IF that position hasn't been named in the call.
     // (Simplified: if arg_names[pos] is empty, it's a candidate for positional)
-    RValuePtr GetArg(const std::vector<RValuePtr>& args, const std::vector<std::string>& call_names, 
-                     const std::string& target_name, int target_pos, RValuePtr default_val = nullptr) {
+    RValuePtr GetArg(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& call_names, 
+                     const MiniString& target_name, int target_pos, RValuePtr default_val = nullptr) {
                          
         // 1. Try Name Match
         for(size_t i=0; i<args.size(); ++i) {
@@ -168,13 +174,13 @@ namespace Evaluator {
     }
 
     // Subassignment: x[i] <- value, x[i,j] <- value, x[[i]] <- value, x$name <- value. Returns modified clone.
-    static RValuePtr SubAssign(RValuePtr x, const std::string& op, const std::vector<RValuePtr>& index_vals, RValuePtr value, std::string& err) {
+    static RValuePtr SubAssign(RValuePtr x, const MiniString& op, const MiniVector<RValuePtr>& index_vals, RValuePtr value, MiniString& err) {
         err.clear();
         if (!x) { err = "object not found"; return nullptr; }
         RValuePtr res = CloneForAssign(x);
         if (op == "$") {
             if (x->type != RType::LIST || index_vals.empty()) { err = "invalid $ assignment"; return nullptr; }
-            std::string key = index_vals[0]->type == RType::CHARACTER ? index_vals[0]->s_vec[0] : index_vals[0]->sym_name;
+            MiniString key = index_vals[0]->type == RType::CHARACTER ? index_vals[0]->s_vec[0] : index_vals[0]->sym_name;
             if (!res->attributes.count("names")) { err = "no names for $ assign"; return nullptr; }
             RValuePtr names_attr = res->attributes["names"];
             for (size_t i = 0; i < res->l_vec.size() && i < (size_t)names_attr->Length(); ++i) {
@@ -227,9 +233,9 @@ namespace Evaluator {
     // --- BUILTINS ---
 
     // assign(x, value, ...) — assign value to name x in environment (R: assign("name", value))
-    RValuePtr Builtin_Assign(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Assign(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.size() < 2) return RR_Nil();
-        std::string name_str;
+        MiniString name_str;
         if (args[0]->type == RType::CHARACTER && args[0]->Length() > 0) name_str = args[0]->s_vec[0];
         else if (args[0]->type == RType::SYMBOL) name_str = args[0]->sym_name;
         else return RR_Nil();
@@ -238,7 +244,7 @@ namespace Evaluator {
         return val;
     }
     
-    RValuePtr Builtin_C(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_C(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         // Combine with R-like coercion priority: character > double > integer > logical
         bool has_char = false, has_double = false, has_int = false, has_lgl = false;
         for (auto& arg : args) {
@@ -255,19 +261,29 @@ namespace Evaluator {
                     res->s_vec.insert(res->s_vec.end(), arg->s_vec.begin(), arg->s_vec.end());
                 } else if (arg->type == RType::INTEGER) {
                     for (int i = 0; i < arg->Length(); ++i)
-                        res->s_vec.push_back(arg->i_vec[i] == R_INT_NA ? "NA" : std::to_string(arg->i_vec[i]));
+                        if (arg->i_vec[i] == R_INT_NA) res->s_vec.push_back("NA");
+                        else {
+                            MiniString tmp = MiniToString(arg->i_vec[i]);
+                            res->s_vec.push_back(tmp);
+                        }
                 } else if (arg->type == RType::LOGICAL) {
                     for (int i = 0; i < arg->Length(); ++i) {
                         int v = arg->i_vec[i];
-                        res->s_vec.push_back(v == R_LOGICAL_NA ? "NA" : (v ? "TRUE" : "FALSE"));
+                        if (v == R_LOGICAL_NA) res->s_vec.push_back("NA");
+                        else if (v) res->s_vec.push_back("TRUE");
+                        else res->s_vec.push_back("FALSE");
                     }
                 } else if (arg->type == RType::DOUBLE) {
                     for (int i = 0; i < arg->Length(); ++i) {
                         double d = arg->d_vec[i];
                         if (std::isnan(d)) res->s_vec.push_back("NA");
-                        else if (d == std::floor(d) && d >= INT32_MIN && d <= INT32_MAX)
-                            res->s_vec.push_back(std::to_string(static_cast<int>(d)));
-                        else res->s_vec.push_back(std::to_string(d));
+                        else if (d == std::floor(d) && d >= INT32_MIN && d <= INT32_MAX) {
+                            MiniString tmp = MiniToString(static_cast<int>(d));
+                            res->s_vec.push_back(tmp);
+                        } else {
+                            MiniString tmp = MiniToString(d);
+                            res->s_vec.push_back(tmp);
+                        }
                     }
                 }
             }
@@ -307,7 +323,7 @@ namespace Evaluator {
         return res;
     }
 
-    RValuePtr Builtin_Add(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Add(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.empty()) return RR_Error("Need 1 or 2 args for +");
         if (args.size() == 1) return args[0]; // unary + is identity
         int lenA = args[0]->Length();
@@ -342,7 +358,7 @@ namespace Evaluator {
         return res;
     }
     
-    RValuePtr Builtin_Diff(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Diff(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
          if (args.empty()) return RR_Error("Need 1 or 2 args for -");
          if (args.size() == 1) {
              // unary minus: negate
@@ -372,8 +388,8 @@ namespace Evaluator {
          WarnRecycle("-", lenA, lenB);
          int N = std::max(lenA, lenB);
          if (AnyDouble(args[0], args[1])) {
-             auto res = std::make_shared<RValue>(RType::DOUBLE);
-             res->d_vec.resize(N);
+            auto res = std::make_shared<RValue>(RType::DOUBLE);
+            res->d_vec.resize(N);
              if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
              for (int i = 0; i < N; ++i) {
                  double a = args[0]->GetDouble(i % lenA);
@@ -382,8 +398,8 @@ namespace Evaluator {
              }
              return res;
          }
-         auto res = std::make_shared<RValue>(RType::INTEGER);
-         res->i_vec.resize(N);
+        auto res = std::make_shared<RValue>(RType::INTEGER);
+        res->i_vec.resize(N);
          if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
          for (int i = 0; i < N; ++i) {
              int a = args[0]->GetInt(i % lenA);
@@ -394,7 +410,7 @@ namespace Evaluator {
          return res;
     }
 
-     RValuePtr Builtin_Mul(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+     RValuePtr Builtin_Mul(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
          if (args.size() < 2) return RR_Error("Need 2 args for *");
          int lenA = args[0]->Length();
          int lenB = args[1]->Length();
@@ -404,8 +420,8 @@ namespace Evaluator {
          WarnRecycle("*", lenA, lenB);
          int N = std::max(lenA, lenB);
          if (AnyDouble(args[0], args[1])) {
-             auto res = std::make_shared<RValue>(RType::DOUBLE);
-             res->d_vec.resize(N);
+            auto res = std::make_shared<RValue>(RType::DOUBLE);
+            res->d_vec.resize(N);
              if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
              for (int i = 0; i < N; ++i) {
                  double a = args[0]->GetDouble(i % lenA);
@@ -414,8 +430,8 @@ namespace Evaluator {
              }
              return res;
          }
-         auto res = std::make_shared<RValue>(RType::INTEGER);
-         res->i_vec.resize(N);
+        auto res = std::make_shared<RValue>(RType::INTEGER);
+        res->i_vec.resize(N);
          if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
          for (int i = 0; i < N; ++i) {
              int a = args[0]->GetInt(i % lenA);
@@ -426,7 +442,7 @@ namespace Evaluator {
          return res;
     }
 
-    RValuePtr Builtin_Div(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Div(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.size() < 2) return RR_Error("Need 2 args for /");
         int lenA = args[0]->Length();
         int lenB = args[1]->Length();
@@ -444,7 +460,7 @@ namespace Evaluator {
         return res;
     }
 
-    RValuePtr Builtin_Pow(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Pow(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.size() < 2) return RR_Error("Need 2 args for ^");
         int lenA = args[0]->Length();
         int lenB = args[1]->Length();
@@ -464,7 +480,7 @@ namespace Evaluator {
 
     // Comparison ops: < > <= >= == !=  (elementwise, recycle, return LOGICAL; NA propagates)
     enum class CmpOp { LT, GT, LE, GE, EQ, NE };
-    static RValuePtr Builtin_Compare(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env, CmpOp op) {
+    static RValuePtr Builtin_Compare(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env, CmpOp op) {
         if (args.size() < 2) return RR_Error("Need 2 args for comparison");
         RValuePtr a = args[0], b = args[1];
         int lenA = a->Length(), lenB = b->Length();
@@ -480,8 +496,8 @@ namespace Evaluator {
         for (int i = 0; i < N; ++i) {
             int ia = i % lenA, ib = i % lenB;
             if (both_char) {
-                const std::string& sa = a->s_vec[ia];
-                const std::string& sb = b->s_vec[ib];
+                const MiniString& sa = a->s_vec[ia];
+                const MiniString& sb = b->s_vec[ib];
                 int c = sa.compare(sb);
                 bool r = (op == CmpOp::LT && c < 0) || (op == CmpOp::GT && c > 0) || (op == CmpOp::LE && c <= 0) || (op == CmpOp::GE && c >= 0) || (op == CmpOp::EQ && c == 0) || (op == CmpOp::NE && c != 0);
                 res->i_vec.push_back(r ? 1 : 0);
@@ -494,14 +510,14 @@ namespace Evaluator {
         }
         return res;
     }
-    RValuePtr Builtin_Lt(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) { return Builtin_Compare(args, names, env, CmpOp::LT); }
-    RValuePtr Builtin_Gt(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) { return Builtin_Compare(args, names, env, CmpOp::GT); }
-    RValuePtr Builtin_Le(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) { return Builtin_Compare(args, names, env, CmpOp::LE); }
-    RValuePtr Builtin_Ge(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) { return Builtin_Compare(args, names, env, CmpOp::GE); }
-    RValuePtr Builtin_Eq(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) { return Builtin_Compare(args, names, env, CmpOp::EQ); }
-    RValuePtr Builtin_Ne(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) { return Builtin_Compare(args, names, env, CmpOp::NE); }
+    RValuePtr Builtin_Lt(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) { return Builtin_Compare(args, names, env, CmpOp::LT); }
+    RValuePtr Builtin_Gt(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) { return Builtin_Compare(args, names, env, CmpOp::GT); }
+    RValuePtr Builtin_Le(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) { return Builtin_Compare(args, names, env, CmpOp::LE); }
+    RValuePtr Builtin_Ge(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) { return Builtin_Compare(args, names, env, CmpOp::GE); }
+    RValuePtr Builtin_Eq(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) { return Builtin_Compare(args, names, env, CmpOp::EQ); }
+    RValuePtr Builtin_Ne(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) { return Builtin_Compare(args, names, env, CmpOp::NE); }
 
-    RValuePtr Builtin_Mod(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Mod(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.size() < 2) return RR_Error("Need 2 args for %%");
         int lenA = args[0]->Length();
         int lenB = args[1]->Length();
@@ -535,7 +551,7 @@ namespace Evaluator {
         return res;
     }
 
-    RValuePtr Builtin_IntDiv(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_IntDiv(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.size() < 2) return RR_Error("Need 2 args for %/%");
         int lenA = args[0]->Length();
         int lenB = args[1]->Length();
@@ -569,7 +585,7 @@ namespace Evaluator {
     }
     
     // --- STANDARD MATH ---
-    RValuePtr Builtin_Log(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Log(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         // base? default e
@@ -577,14 +593,14 @@ namespace Evaluator {
         for(int i=0; i<x->Length(); ++i) res->d_vec.push_back(std::log(x->GetDouble(i)));
         return res;
     }
-    RValuePtr Builtin_Exp(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Exp(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         auto res = std::make_shared<RValue>(RType::DOUBLE);
         for(int i=0; i<x->Length(); ++i) res->d_vec.push_back(std::exp(x->GetDouble(i)));
         return res;
     }
-    RValuePtr Builtin_Sqrt(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Sqrt(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         auto res = std::make_shared<RValue>(RType::DOUBLE);
@@ -595,14 +611,14 @@ namespace Evaluator {
         }
         return res;
     }
-    RValuePtr Builtin_Abs(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Abs(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         auto res = std::make_shared<RValue>(RType::DOUBLE);
         for(int i=0; i<x->Length(); ++i) res->d_vec.push_back(std::abs(x->GetDouble(i)));
         return res;
     }
-    RValuePtr Builtin_Round(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Round(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         RValuePtr dig = GetArg(args, names, "digits", 1);
@@ -618,7 +634,7 @@ namespace Evaluator {
     }
     
     // --- LOGIC OPS ---
-    RValuePtr Builtin_And(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_And(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
           if (args.size() < 2) return RR_Error("Need 2 args for &");
           // Elementwise
           int lenA = args[0]->Length();
@@ -637,7 +653,7 @@ namespace Evaluator {
           }
           return res;
     }
-    RValuePtr Builtin_Or(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Or(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
           if (args.size() < 2) return RR_Error("Need 2 args for |");
           int lenA = args[0]->Length();
           int lenB = args[1]->Length();
@@ -656,7 +672,7 @@ namespace Evaluator {
           return res;
     }
 
-    RValuePtr Builtin_Not(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Not(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.empty()) return RR_Error("Need 1 arg for !");
         RValuePtr x = args[0];
         auto res = std::make_shared<RValue>(RType::LOGICAL);
@@ -668,9 +684,9 @@ namespace Evaluator {
     }
     // --- CLOSURE CALL HELPER ---
     // We need to expose a way for BUILTINS (like lapply) to call functions (closures/builtins)
-    RValuePtr ApplyFunction(RValuePtr func, const std::vector<RValuePtr>& args, RValuePtr env) {
+    RValuePtr ApplyFunction(RValuePtr func, const MiniVector<RValuePtr>& args, RValuePtr env) {
           if (func->type == RType::BUILTIN) {
-              std::vector<std::string> names(args.size(), ""); // No names for now
+              MiniVector<MiniString> names; names.resize(args.size()); // No names for now
               return func->builtin(args, names, env);
           }
           if (func->type == RType::CLOSURE) {
@@ -688,7 +704,7 @@ namespace Evaluator {
     }
 
     // --- FUNCTIONAL OPS ---
-    RValuePtr Builtin_Lapply(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Lapply(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.size() < 2) return RR_Error("lapply(X, FUN)");
         RValuePtr X = args[0];
         RValuePtr FUN = args[1];
@@ -713,7 +729,7 @@ namespace Evaluator {
                  else if (X->type == RType::CHARACTER) { elem->type = RType::CHARACTER; elem->s_vec.push_back(X->s_vec[i]); }
              }
              
-             std::vector<RValuePtr> fargs = { elem };
+             MiniVector<RValuePtr> fargs = { elem };
              // Additional args?
              RValuePtr val = ApplyFunction(FUN, fargs, env);
              res->l_vec.push_back(val);
@@ -721,7 +737,7 @@ namespace Evaluator {
         return res;
     }
     
-    RValuePtr Builtin_Sapply(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Sapply(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
          // lapply then simplify
          RValuePtr l = Builtin_Lapply(args, names, env);
          if (l->type == RType::ERROR) return l;
@@ -748,7 +764,7 @@ namespace Evaluator {
     }
     
     // --- STRING OPS ---
-    RValuePtr Builtin_Nchar(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Nchar(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         auto res = std::make_shared<RValue>(RType::INTEGER);
@@ -759,7 +775,7 @@ namespace Evaluator {
         return res;
     }
     
-    RValuePtr Builtin_Substr(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Substr(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         // substr(x, start, stop)
         if (args.size() < 3) return RR_Error("substr(x, start, stop)");
         RValuePtr x = args[0];
@@ -768,7 +784,7 @@ namespace Evaluator {
         
         auto res = std::make_shared<RValue>(RType::CHARACTER);
         for(int i=0; i<x->Length(); ++i) {
-            std::string s = "";
+            MiniString s = "";
             if (x->type == RType::CHARACTER) s = x->s_vec[i];
             
             // R uses 1-based indexing
@@ -786,7 +802,7 @@ namespace Evaluator {
     // --- MATCHING ---
     // match(x, table, nomatch = NA_integer_, incomparables = NULL)
     // %in% calls match
-    RValuePtr Builtin_Match(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Match(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.size() < 2) return RR_Error("match(x, table)");
         RValuePtr x = args[0];
         RValuePtr table = args[1];
@@ -812,7 +828,7 @@ namespace Evaluator {
         return res;
     }
 
-    RValuePtr Builtin_In(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_In(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         // x %in% table -> match(x, table, nomatch=0) > 0
         RValuePtr m = Builtin_Match(args, names, env);
         if (m->type == RType::ERROR) return m;
@@ -827,12 +843,12 @@ namespace Evaluator {
     // --- RANDOMNESS ---
     static std::mt19937 g_rng(1234);
     
-    RValuePtr Builtin_SetSeed(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_SetSeed(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (!args.empty()) g_rng.seed(args[0]->GetInt(0));
         return RR_Nil();
     }
     
-    RValuePtr Builtin_Runif(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Runif(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         int n = (!args.empty()) ? args[0]->GetInt(0) : 0;
         double min = 0, max = 1;
         if (args.size() > 1) min = args[1]->GetDouble(0);
@@ -844,7 +860,7 @@ namespace Evaluator {
         return res;
     }
     
-    RValuePtr Builtin_Rnorm(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Rnorm(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         int n = (!args.empty()) ? args[0]->GetInt(0) : 0;
         double mean = 0, sd = 1;
         if (args.size() > 1) mean = args[1]->GetDouble(0);
@@ -856,13 +872,13 @@ namespace Evaluator {
         return res;
     }
     
-    RValuePtr Builtin_Sample(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Sample(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         // sample(x, size, replace = FALSE)
         if (args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         
         // If x is a single number, sample from 1:x
-         std::vector<int> indices;
+         MiniVector<int> indices;
          int N = x->Length();
          if (N == 1 && x->type == RType::INTEGER && x->GetInt(0) > 0) {
              N = x->GetInt(0);
@@ -917,7 +933,7 @@ namespace Evaluator {
     
     // --- LOGIC & SETS ---
     // ifelse(test, yes, no)
-    RValuePtr Builtin_IfElse(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_IfElse(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.size() < 3) return RR_Error("ifelse needs 3 args");
         RValuePtr test = args[0];
         RValuePtr yes = args[1];
@@ -945,23 +961,23 @@ namespace Evaluator {
             
             if (outType == RType::DOUBLE) res->d_vec.push_back(src->GetDouble(src_idx));
             else if (outType == RType::INTEGER) res->i_vec.push_back(src->GetInt(src_idx)); // Simplified
-            else if (outType == RType::CHARACTER) {
+                else if (outType == RType::CHARACTER) {
                 if (src->type == RType::CHARACTER) res->s_vec.push_back(src->s_vec[src_idx]);
-                else res->s_vec.push_back(std::to_string(src->GetDouble(src_idx)));
+                else res->s_vec.push_back(MiniToString(src->GetDouble(src_idx)));
             }
         }
         return res;
     }
     
     // unique(x)
-    RValuePtr Builtin_Unique(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Unique(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         
         auto res = std::make_shared<RValue>(x->type);
         std::set<double> seen_d;
         std::set<int> seen_i;
-        std::set<std::string> seen_s;
+        std::set<MiniString> seen_s;
         
         bool seen_na_double = false;
         for(int i=0; i<x->Length(); ++i) {
@@ -971,7 +987,7 @@ namespace Evaluator {
                     if (!seen_na_double) { seen_na_double = true; res->d_vec.push_back(v); }
                 } else if (seen_d.find(v) == seen_d.end()) { seen_d.insert(v); res->d_vec.push_back(v); }
             } else if (x->type == RType::CHARACTER) {
-                std::string v = x->s_vec[i];
+                MiniString v = x->s_vec[i];
                 if (seen_s.find(v) == seen_s.end()) { seen_s.insert(v); res->s_vec.push_back(v); }
             } else {
                 int v = x->i_vec[i];
@@ -985,7 +1001,7 @@ namespace Evaluator {
     }
     
     // duplicated(x, fromLast = FALSE) – logical vector, TRUE for elements that have appeared before
-    RValuePtr Builtin_Duplicated(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Duplicated(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         RValuePtr fromLast_arg = GetArg(args, names, "fromLast", 1, nullptr);
@@ -997,7 +1013,7 @@ namespace Evaluator {
 
         std::set<double> seen_d;
         std::set<int> seen_i;
-        std::set<std::string> seen_s;
+        std::set<MiniString> seen_s;
         bool seen_na_double = false;
         bool seen_na_int = false;
 
@@ -1012,7 +1028,7 @@ namespace Evaluator {
                     else { seen_d.insert(v); res->i_vec[i] = 0; }
                 }
             } else if (x->type == RType::CHARACTER) {
-                const std::string& v = x->s_vec[i];
+                const MiniString& v = x->s_vec[i];
                 if (seen_s.find(v) != seen_s.end()) res->i_vec[i] = 1;
                 else { seen_s.insert(v); res->i_vec[i] = 0; }
             } else { // INTEGER or LOGICAL
@@ -1037,7 +1053,7 @@ namespace Evaluator {
     }
     
     // cumsum(x)
-    RValuePtr Builtin_Cumsum(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Cumsum(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         auto res = std::make_shared<RValue>(RType::DOUBLE); // Force double
@@ -1050,7 +1066,7 @@ namespace Evaluator {
     }
 
     // seq(from = 1, to = 1, by = ((to - from)/(length.out - 1)), length.out = NULL, along.with = NULL, ...)
-    RValuePtr Builtin_Seq(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Seq(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         RValuePtr from = GetArg(args, names, "from", 0);
         RValuePtr to = GetArg(args, names, "to", 1);
         RValuePtr by = GetArg(args, names, "by", 2);
@@ -1087,7 +1103,7 @@ namespace Evaluator {
     }
     
     // rep(x, times = 1, length.out = NA, each = 1) - preserve type; support length.out
-    RValuePtr Builtin_Rep(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Rep(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         RValuePtr x = GetArg(args, names, "x", 0);
         RValuePtr times = GetArg(args, names, "times", 1);
         RValuePtr len_out = GetArg(args, names, "length.out", -1);
@@ -1142,7 +1158,7 @@ namespace Evaluator {
         return res;
     }
 
-    RValuePtr Builtin_Colon(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Colon(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
          if (args.size() < 2) return RR_Error("Need 2 args for :");
          double a = args[0]->GetDouble(0);
          double b = args[1]->GetDouble(0);
@@ -1167,7 +1183,7 @@ namespace Evaluator {
     }
     
     // sequence(nvec) -> 1:n1, 1:n2 ...
-    RValuePtr Builtin_Sequence(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Sequence(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.empty()) return RR_Nil();
         RValuePtr nvec = args[0];
         
@@ -1181,20 +1197,20 @@ namespace Evaluator {
     }
 
     // --- INTROSPECTION ---
-    RValuePtr Builtin_Length(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Length(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         auto res = std::make_shared<RValue>(RType::INTEGER);
         res->i_vec.push_back(args[0]->Length());
         return res;
     }
     
-    RValuePtr Builtin_Names(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Names(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         if (args[0]->attributes.count("names")) return args[0]->attributes["names"];
         return RR_Nil();
     }
     
-    RValuePtr Builtin_Class(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Class(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         auto res = std::make_shared<RValue>(RType::CHARACTER);
         if (args[0]->attributes.count("class")) {
@@ -1215,14 +1231,14 @@ namespace Evaluator {
         return res;
     }
     
-    RValuePtr Builtin_Levels(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Levels(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         if (args[0]->attributes.count("levels")) return args[0]->attributes["levels"];
         return RR_Nil();
     }
     
     // rev(x)
-    RValuePtr Builtin_Rev(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Rev(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         auto res = std::make_shared<RValue>(x->type);
@@ -1240,7 +1256,7 @@ namespace Evaluator {
     
     // --- STATISTICS ---
     // var(x), sd(x) => denominator n-1; na.rm supported
-    RValuePtr Builtin_Var(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Var(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         RValuePtr narm_arg = GetArg(args, names, "na.rm", 1, nullptr);
         bool na_rm = narm_arg ? IsTrue(narm_arg) : false;
@@ -1251,7 +1267,7 @@ namespace Evaluator {
         }
         int n = 0;
         double sum = 0;
-        std::vector<double> vals;
+        MiniVector<double> vals;
         bool seen_na = false;
         for (int i = 0; i < x->Length(); ++i) {
             double d = x->GetDouble(i);
@@ -1278,7 +1294,7 @@ namespace Evaluator {
         return res;
     }
     
-    RValuePtr Builtin_Sd(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Sd(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         RValuePtr v = Builtin_Var(args, names, env);
         if (v->type == RType::ERROR) return v;
         if (!v->d_vec.empty() && !std::isnan(v->d_vec[0])) {
@@ -1288,26 +1304,26 @@ namespace Evaluator {
     }
 
     // --- TYPE CHECKERS & CONSTRUCTORS ---
-    RValuePtr Builtin_IsNumeric(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_IsNumeric(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         bool is = (args[0]->type == RType::DOUBLE || args[0]->type == RType::INTEGER);
         auto res = std::make_shared<RValue>(RType::LOGICAL);
         res->i_vec.push_back(is ? 1 : 0);
         return res;
     }
-    RValuePtr Builtin_IsCharacter(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_IsCharacter(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         auto res = std::make_shared<RValue>(RType::LOGICAL);
         res->i_vec.push_back(args[0]->type == RType::CHARACTER ? 1 : 0);
         return res;
     }
-    RValuePtr Builtin_IsLogical(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_IsLogical(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         auto res = std::make_shared<RValue>(RType::LOGICAL);
         res->i_vec.push_back(args[0]->type == RType::LOGICAL ? 1 : 0);
         return res;
     }
-    RValuePtr Builtin_IsList(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_IsList(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         bool is_list = (x->type == RType::LIST);
@@ -1320,7 +1336,7 @@ namespace Evaluator {
         res->i_vec.push_back(is_list ? 1 : 0);
         return res;
     }
-    RValuePtr Builtin_IsNull(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_IsNull(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         auto res = std::make_shared<RValue>(RType::LOGICAL);
         res->i_vec.push_back(args[0]->type == RType::NIL ? 1 : 0);
@@ -1328,7 +1344,7 @@ namespace Evaluator {
     }
     
     // Internal helper: allocate vector of given length (used by numeric/character/logical via their own REG)
-    RValuePtr Builtin_AllocVector(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_AllocVector(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
          int n = 0;
          if (!args.empty()) n = args[0]->GetInt(0);
          if (n < 0) n = 0;
@@ -1337,19 +1353,19 @@ namespace Evaluator {
          return res;
     }
     
-    RValuePtr Builtin_Numeric(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Numeric(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         int n = (!args.empty()) ? args[0]->GetInt(0) : 0;
         auto res = std::make_shared<RValue>(RType::DOUBLE);
         res->d_vec.resize(n, 0.0);
         return res;
     }
-    RValuePtr Builtin_Character(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Character(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         int n = (!args.empty()) ? args[0]->GetInt(0) : 0;
         auto res = std::make_shared<RValue>(RType::CHARACTER);
         res->s_vec.resize(n, "");
         return res;
     }
-    RValuePtr Builtin_Logical(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Logical(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         int n = (!args.empty()) ? args[0]->GetInt(0) : 0;
         auto res = std::make_shared<RValue>(RType::LOGICAL);
         res->i_vec.resize(n, 0); // FALSE default
@@ -1358,13 +1374,13 @@ namespace Evaluator {
 
     // --- STRING OPS ---
     // paste(..., sep=" ", collapse=NULL)
-    RValuePtr Builtin_Paste(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Paste(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         RValuePtr sep_arg = GetArg(args, names, "sep", -1);
-        std::string sep = " ";
+        MiniString sep = " ";
         if (sep_arg && sep_arg->Length() > 0) sep = sep_arg->s_vec[0];
         
         // Collect args that are NOT sep/collapse
-        std::vector<RValuePtr> inputs;
+        MiniVector<RValuePtr> inputs;
         int max_len = 0;
         for(size_t i=0; i<args.size(); ++i) {
              if (names.size() > i && (names[i] == "sep" || names[i] == "collapse")) continue;
@@ -1377,15 +1393,15 @@ namespace Evaluator {
         
         auto res = std::make_shared<RValue>(RType::CHARACTER);
         for(int i=0; i<max_len; ++i) {
-            std::string s;
+            MiniString s;
             for(size_t k=0; k<inputs.size(); ++k) {
                 if (k > 0) s += sep;
                 int idx = i % inputs[k]->Length(); // Recycle
                 // Convert to string
                 RValuePtr v = inputs[k];
                 if (v->type == RType::CHARACTER) s += v->s_vec[idx];
-                else if (v->type == RType::DOUBLE) s += std::to_string(v->d_vec[idx]); // format?
-                else if (v->type == RType::INTEGER) s += std::to_string(v->i_vec[idx]);
+                else if (v->type == RType::DOUBLE) s += MiniToString(v->d_vec[idx]); // format?
+                else if (v->type == RType::INTEGER) s += MiniToString(v->i_vec[idx]);
                 else if (v->type == RType::LOGICAL) s += (v->i_vec[idx] ? "TRUE" : "FALSE");
             }
             res->s_vec.push_back(s);
@@ -1394,8 +1410,8 @@ namespace Evaluator {
         // collapse?
         RValuePtr col_arg = GetArg(args, names, "collapse", -1);
         if (col_arg) {
-             std::string col_sep = col_arg->s_vec.empty() ? "" : col_arg->s_vec[0];
-             std::string final_s;
+             MiniString col_sep = col_arg->s_vec.empty() ? "" : col_arg->s_vec[0];
+             MiniString final_s;
              for(size_t i=0; i<res->s_vec.size(); ++i) {
                  if (i > 0) final_s += col_sep;
                  final_s += res->s_vec[i];
@@ -1407,13 +1423,13 @@ namespace Evaluator {
         return res;
     }
     
-    RValuePtr Builtin_Paste0(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Paste0(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         // paste(..., sep="")
         // Inject sep="" logic or just copy paste
         // For simplicity, just force sep="" in logic.
         // Or cleaner: modify args? No, args are RValues.
         // Just duplicate logic simplified:
-        std::vector<RValuePtr> inputs;
+        MiniVector<RValuePtr> inputs;
         int max_len = 0;
         for(auto& a : args) {
             inputs.push_back(a);
@@ -1421,18 +1437,18 @@ namespace Evaluator {
         }
         auto res = std::make_shared<RValue>(RType::CHARACTER);
         for(int i=0; i<max_len; ++i) {
-            std::string s;
+            MiniString s;
             for(size_t k=0; k<inputs.size(); ++k) {
                 int idx = i % inputs[k]->Length(); 
                 RValuePtr v = inputs[k];
                 if (v->type == RType::CHARACTER) s += v->s_vec[idx];
                 else if (v->type == RType::DOUBLE) {
                     // strip trailing zeros?
-                    std::string tmp = std::to_string(v->d_vec[idx]);
+                    MiniString tmp = MiniToString(v->d_vec[idx]);
                     s += tmp.substr(0, tmp.find_last_not_of('0')+1); 
                     if (s.back() == '.') s.pop_back();
                 }
-                else if (v->type == RType::INTEGER) s += std::to_string(v->i_vec[idx]);
+                else if (v->type == RType::INTEGER) s += MiniToString(v->i_vec[idx]);
                 else if (v->type == RType::LOGICAL) s += (v->i_vec[idx] ? "TRUE" : "FALSE");
             }
             res->s_vec.push_back(s);
@@ -1442,7 +1458,7 @@ namespace Evaluator {
     
     // --- MATRIX: DIAG ---
     // diag(x) -> if scalar, Identity(n). If matrix, extract diag. If vector, make diag matrix.
-    RValuePtr Builtin_Diag(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Diag(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         
@@ -1489,16 +1505,16 @@ namespace Evaluator {
     }
     
     // --- UTILS: Table, Head, Tail ---
-    RValuePtr Builtin_Table(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Table(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         // Simplified table: 1 arg only
          if (args.empty()) return RR_Nil();
          RValuePtr x = args[0];
-         std::map<std::string, int> counts;
+         std::map<MiniString, int> counts;
          for(int i=0; i<x->Length(); ++i) {
-             std::string s; // Key
+             MiniString s; // Key
              if (x->type == RType::CHARACTER) s = x->s_vec[i];
-             else if (x->type == RType::INTEGER) s = std::to_string(x->i_vec[i]);
-             else s = std::to_string(x->GetDouble(i));
+             else if (x->type == RType::INTEGER) s = MiniToString(x->i_vec[i]);
+             else s = MiniToString(x->GetDouble(i));
              counts[s]++;
          }
          
@@ -1515,7 +1531,7 @@ namespace Evaluator {
          return res;
     }
     
-    RValuePtr Builtin_Head(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Head(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         int n = 6;
@@ -1551,7 +1567,7 @@ namespace Evaluator {
         return res;
     }
     
-    RValuePtr Builtin_Tail(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Tail(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         int n = 6;
@@ -1589,7 +1605,7 @@ namespace Evaluator {
     }
 
     // matrix(data = NA, nrow = 1, ncol = 1, byrow = FALSE, dimnames = NULL)
-    RValuePtr Builtin_Matrix(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Matrix(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         RValuePtr data = GetArg(args, names, "data", 0);
         RValuePtr nrow_arg = GetArg(args, names, "nrow", 1);
         RValuePtr ncol_arg = GetArg(args, names, "ncol", 2);
@@ -1649,7 +1665,7 @@ namespace Evaluator {
     }
     
     // dim(x)
-    RValuePtr Builtin_Dim(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Dim(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.empty()) return RR_Nil();
         if (args[0]->attributes.count("dim")) {
             return args[0]->attributes["dim"];
@@ -1660,7 +1676,7 @@ namespace Evaluator {
 
     // --- SUBSETTING ---
     // [ (x, i, j, ..., drop)
-    RValuePtr Builtin_Subset(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Subset(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.empty()) return RR_Error("Empty subset");
         RValuePtr x = args[0];
         
@@ -1669,12 +1685,12 @@ namespace Evaluator {
             // df["Height"], df[2]
             if (args.size() == 2) {
                 RValuePtr col_idx = args[1];
-                std::vector<int> cols;
+                MiniVector<int> cols;
                 RValuePtr names_attr = x->attributes.count("names") ? x->attributes["names"] : RR_Nil();
 
                 if (col_idx->type == RType::CHARACTER && names_attr && names_attr->type == RType::CHARACTER) {
                     for (int k = 0; k < col_idx->Length(); ++k) {
-                        const std::string &key = col_idx->s_vec[k];
+                        const MiniString &key = col_idx->s_vec[k];
                         bool found = false;
                         for (size_t j = 0; j < x->l_vec.size() && j < (size_t)names_attr->Length(); ++j) {
                             if (names_attr->s_vec[j] == key) { cols.push_back((int)j); found = true; break; }
@@ -1712,7 +1728,7 @@ namespace Evaluator {
                 RValuePtr names_attr = x->attributes.count("names") ? x->attributes["names"] : RR_Nil();
                 if (cols_arg->type == RType::CHARACTER && cols_arg->Length() > 0 &&
                     names_attr && names_attr->type == RType::CHARACTER) {
-                    std::string key = cols_arg->s_vec[0];
+                    MiniString key = cols_arg->s_vec[0];
                     for (size_t k = 0; k < x->l_vec.size() && k < (size_t)names_attr->Length(); ++k) {
                         if (names_attr->s_vec[k] == key) { j = (int)k; break; }
                     }
@@ -1741,7 +1757,7 @@ namespace Evaluator {
             if (drop_arg) drop = IsTrue(drop_arg);
             
             // Row indices: -1 means NA (output NA), else 0-based valid index
-            std::vector<int> r_idx;
+            MiniVector<int> r_idx;
             if (rows->type == RType::NIL || rows->Length() == 0) {
                 for(int i=0; i<nr; ++i) r_idx.push_back(i);
             } else {
@@ -1752,7 +1768,7 @@ namespace Evaluator {
                     r_idx.push_back((idx >= 0 && idx < nr) ? idx : -1);
                 }
             }
-            std::vector<int> c_idx;
+            MiniVector<int> c_idx;
             if (cols->type == RType::NIL || cols->Length() == 0) {
                 for(int i=0; i<nc; ++i) c_idx.push_back(i);
             } else {
@@ -1831,7 +1847,7 @@ namespace Evaluator {
     }
     
     // [[ (x, i) - Extract single element
-    RValuePtr Builtin_Subset2(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Subset2(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.size() < 2) return RR_Error("Need index for [[");
         RValuePtr x = args[0];
         RValuePtr idx = args[1];
@@ -1839,7 +1855,7 @@ namespace Evaluator {
         // Name-based extraction for list/data.frame: x[["name"]]
         if ((idx->type == RType::CHARACTER || idx->type == RType::SYMBOL) &&
             x->type == RType::LIST && x->attributes.count("names")) {
-            std::string key;
+            MiniString key;
             if (idx->type == RType::SYMBOL) key = idx->sym_name;
             else if (idx->type == RType::CHARACTER && idx->Length() > 0) key = idx->s_vec[0];
             RValuePtr names_attr = x->attributes["names"];
@@ -1872,7 +1888,7 @@ namespace Evaluator {
         return res;
     }
 
-    RValuePtr Builtin_NRow(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_NRow(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
          if (args.empty()) return RR_Nil();
          RValuePtr x = args[0];
          if (x->attributes.count("dim")) {
@@ -1888,7 +1904,7 @@ namespace Evaluator {
          return RR_Nil();
     }
     
-    RValuePtr Builtin_NCol(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_NCol(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
          if (args.empty()) return RR_Nil();
          RValuePtr x = args[0];
          if (x->attributes.count("dim")) {
@@ -1910,7 +1926,7 @@ namespace Evaluator {
     // Ops: 0=SUM, 1=MAX, 2=MIN, 3=ANY, 4=ALL
     // --- COERCION & CHECKS ---
     
-    RValuePtr Builtin_AsLogical(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_AsLogical(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         auto res = std::make_shared<RValue>(RType::LOGICAL);
@@ -1918,7 +1934,7 @@ namespace Evaluator {
         return res;
     }
     
-    RValuePtr Builtin_AsCharacter(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_AsCharacter(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         auto res = std::make_shared<RValue>(RType::CHARACTER);
@@ -1928,15 +1944,12 @@ namespace Evaluator {
                  if (IsNAReal(d)) res->s_vec.push_back("NA");
                  else if (std::isnan(d)) res->s_vec.push_back("NaN");
                  else if (std::isinf(d)) res->s_vec.push_back(d > 0 ? "Inf" : "-Inf");
-                 else {
-                     std::ostringstream oss;
-                     oss.setf(std::ios::fmtflags(0), std::ios::floatfield);
-                     oss << std::setprecision(7) << d;
-                     res->s_vec.push_back(oss.str());
-                 }
+                else {
+                    res->s_vec.push_back(MiniToString(d));
+                }
              } else if (x->type == RType::INTEGER) {
                  if (x->i_vec[i] == R_INT_NA) res->s_vec.push_back("NA");
-                 else res->s_vec.push_back(std::to_string(x->i_vec[i]));
+                 else res->s_vec.push_back(MiniToString(x->i_vec[i]));
              } else if (x->type == RType::LOGICAL) {
                  if (x->i_vec[i] == R_LOGICAL_NA) res->s_vec.push_back("NA");
                  else res->s_vec.push_back(x->i_vec[i] ? "TRUE" : "FALSE");
@@ -1946,7 +1959,7 @@ namespace Evaluator {
         return res;
     }
 
-    RValuePtr Builtin_IsMatrix(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_IsMatrix(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         int v = (args[0]->attributes.count("dim") > 0) ? 1 : 0;
         auto res = std::make_shared<RValue>(RType::LOGICAL);
@@ -1954,7 +1967,7 @@ namespace Evaluator {
         return res;
     }
 
-    RValuePtr Builtin_IsVector(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_IsVector(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         // R says is.vector returns TRUE if it has no attributes other than names
         // Simplified: return true if atomic type and no dim?
@@ -1964,7 +1977,7 @@ namespace Evaluator {
         return res;
     }
 
-    RValuePtr Builtin_IsNA(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_IsNA(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         auto res = std::make_shared<RValue>(RType::LOGICAL);
@@ -1986,14 +1999,14 @@ namespace Evaluator {
     // --- INDEXING & PARALLEL ---
 
     // which(x, arr.ind=FALSE) - Returns flat indices, or matrix of (row,col) if arr.ind=TRUE
-    RValuePtr Builtin_Which(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Which(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         RValuePtr arr_ind_arg = GetArg(args, names, "arr.ind", 1, nullptr);
         bool arr_ind = arr_ind_arg ? IsTrue(arr_ind_arg) : false;
         
         // Collect indices where TRUE
-        std::vector<int> true_indices;
+        MiniVector<int> true_indices;
         for(int i=0; i<x->Length(); ++i) {
             int lv = AsLogicalAt(x, i);
             if (lv == 1) { // TRUE; NA treated as FALSE, like R
@@ -2008,7 +2021,7 @@ namespace Evaluator {
                 // Return matrix: n rows (one per TRUE), 2 cols (row, col indices, 1-based)
                 // Column-major storage: push all row indices, then all col indices
                 auto res = std::make_shared<RValue>(RType::INTEGER);
-                std::vector<int> rows, cols;
+                MiniVector<int> rows, cols;
                 for (int flat : true_indices) {
                     int r = (flat % nr) + 1;  // 1-based row
                     int c = (flat / nr) + 1;  // 1-based col
@@ -2031,7 +2044,7 @@ namespace Evaluator {
         return res;
     }
     
-    RValuePtr Builtin_WhichMin(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_WhichMin(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         int idx = -1;
@@ -2051,7 +2064,7 @@ namespace Evaluator {
         return res;
     }
     
-    RValuePtr Builtin_WhichMax(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_WhichMax(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         int idx = -1;
@@ -2071,7 +2084,7 @@ namespace Evaluator {
     }
     
     // --- MATRIX OPS ---
-    RValuePtr Builtin_Bind(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env, bool col_bind) {
+    RValuePtr Builtin_Bind(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env, bool col_bind) {
         // Collect all data and dims
         // Simplified: Assume all inputs are vectors or matrices
         // If vector, treat as nx1 (cbind) or 1xn (rbind)
@@ -2182,11 +2195,11 @@ namespace Evaluator {
         return res;
     }
     
-    RValuePtr Builtin_Rbind(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) { return Builtin_Bind(args, names, env, false); }
-    RValuePtr Builtin_Cbind(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) { return Builtin_Bind(args, names, env, true); }
+    RValuePtr Builtin_Rbind(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) { return Builtin_Bind(args, names, env, false); }
+    RValuePtr Builtin_Cbind(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) { return Builtin_Bind(args, names, env, true); }
     
     // t(x)
-    RValuePtr Builtin_Transpose(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Transpose(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         
@@ -2214,7 +2227,7 @@ namespace Evaluator {
     }
     
     // %*%
-    RValuePtr Builtin_MatMult(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_MatMult(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.size() < 2) return RR_Error("Need 2 args for %*%");
         RValuePtr A = args[0];
         RValuePtr B = args[1];
@@ -2250,7 +2263,7 @@ namespace Evaluator {
     }
     
     // row(x), col(x)
-    RValuePtr Builtin_Row(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Row(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.empty() || !args[0]->attributes.count("dim")) return RR_Error("row expects matrix");
         int nr = args[0]->attributes["dim"]->GetInt(0);
         int nc = args[0]->attributes["dim"]->GetInt(1);
@@ -2263,7 +2276,7 @@ namespace Evaluator {
         res->attributes["dim"] = args[0]->attributes["dim"];
         return res;
     }
-    RValuePtr Builtin_Col(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Col(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.empty() || !args[0]->attributes.count("dim")) return RR_Error("col expects matrix");
         int nr = args[0]->attributes["dim"]->GetInt(0);
         int nc = args[0]->attributes["dim"]->GetInt(1);
@@ -2278,19 +2291,19 @@ namespace Evaluator {
     }
     
     // factor(x)
-    RValuePtr Builtin_Factor(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Factor(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         // Simplified: Strings -> Integers + Levels
         // 1. Collect unique strings
-        std::vector<std::string> raw;
+        MiniVector<MiniString> raw;
         for(int i=0; i<x->Length(); ++i) {
              if (x->type == RType::CHARACTER) raw.push_back(x->s_vec[i]);
              else if (x->type == RType::LOGICAL) raw.push_back(x->i_vec[i] == 1 ? "TRUE" : "FALSE");
-             else raw.push_back(std::to_string(x->GetDouble(i)));
+             else raw.push_back(MiniToString(x->GetDouble(i)));
         }
         
-        std::vector<std::string> levels = raw;
+        MiniVector<MiniString> levels = raw;
         std::sort(levels.begin(), levels.end());
         levels.erase(std::unique(levels.begin(), levels.end()), levels.end());
         
@@ -2312,7 +2325,7 @@ namespace Evaluator {
     }
     
     // list(...) - named or positional list
-    RValuePtr Builtin_List(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_List(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         auto res = std::make_shared<RValue>(RType::LIST);
         for (size_t i = 0; i < args.size(); ++i) {
             res->l_vec.push_back(args[i]);
@@ -2328,7 +2341,7 @@ namespace Evaluator {
     }
     
     // data.frame(...) - Simplified to List + Class
-    RValuePtr Builtin_DataFrame(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_DataFrame(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         // Reuse list logic but set class
         RValuePtr l = Builtin_List(args, names, env);
         auto cls = std::make_shared<RValue>(RType::CHARACTER);
@@ -2346,7 +2359,7 @@ namespace Evaluator {
     }
     
     // as.matrix(x)
-    RValuePtr Builtin_AsMatrix(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_AsMatrix(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         if (x->attributes.count("dim")) return x; // already matrix?
@@ -2370,10 +2383,10 @@ namespace Evaluator {
                 for (int c = 0; c < nc; ++c) {
                     RValuePtr col = x->l_vec[c];
                     for (int r = 0; r < nr; ++r) {
-                        std::string out = "NA";
+                        MiniString out = "NA";
                         if (!col || r >= col->Length()) out = "NA";
                         else if (col->type == RType::CHARACTER) out = col->s_vec[r];
-                        else if (col->type == RType::INTEGER) out = (col->i_vec[r] == R_INT_NA) ? "NA" : std::to_string(col->i_vec[r]);
+                        else if (col->type == RType::INTEGER) out = (col->i_vec[r] == R_INT_NA) ? "NA" : MiniToString(col->i_vec[r]);
                         else if (col->type == RType::LOGICAL) {
                             int v = col->i_vec[r];
                             out = (v == R_LOGICAL_NA) ? "NA" : (v ? "TRUE" : "FALSE");
@@ -2382,10 +2395,7 @@ namespace Evaluator {
                             if (IsNAReal(d)) out = "NA";
                             else if (std::isnan(d)) out = "NaN";
                             else {
-                                std::ostringstream oss;
-                                oss.setf(std::ios::fmtflags(0), std::ios::floatfield);
-                                oss << std::setprecision(7) << d;
-                                out = oss.str();
+                                out = MiniToString(d);
                             }
                         }
                         res->s_vec[c * nr + r] = out; // column-major
@@ -2435,7 +2445,7 @@ namespace Evaluator {
         return res;
     }
 
-    RValuePtr Builtin_PMax(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_PMax(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.empty()) return RR_Nil();
         auto res = std::make_shared<RValue>(RType::DOUBLE);
         
@@ -2456,7 +2466,7 @@ namespace Evaluator {
         return res;
     }
 
-    RValuePtr Builtin_PMin(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_PMin(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.empty()) return RR_Nil();
         auto res = std::make_shared<RValue>(RType::DOUBLE);
         
@@ -2476,7 +2486,7 @@ namespace Evaluator {
         return res;
     }
 
-    RValuePtr Builtin_Summary(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env, int op) {
+    RValuePtr Builtin_Summary(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env, int op) {
         // na.rm is 2nd param (e.g. sum(x, na.rm=FALSE)); don't use last arg position or we steal the only arg for mean(x)
         RValuePtr narm_arg = GetArg(args, names, "na.rm", 1, nullptr);
         bool na_rm = narm_arg ? IsTrue(narm_arg) : false;
@@ -2538,13 +2548,13 @@ namespace Evaluator {
         return res;
     }
     
-    RValuePtr Builtin_Sum(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) { return Builtin_Summary(args, names, env, 0); }
-    RValuePtr Builtin_Max(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) { return Builtin_Summary(args, names, env, 1); }
-    RValuePtr Builtin_Min(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) { return Builtin_Summary(args, names, env, 2); }
-    RValuePtr Builtin_Any(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) { return Builtin_Summary(args, names, env, 3); }
-    RValuePtr Builtin_All(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) { return Builtin_Summary(args, names, env, 4); }
+    RValuePtr Builtin_Sum(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) { return Builtin_Summary(args, names, env, 0); }
+    RValuePtr Builtin_Max(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) { return Builtin_Summary(args, names, env, 1); }
+    RValuePtr Builtin_Min(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) { return Builtin_Summary(args, names, env, 2); }
+    RValuePtr Builtin_Any(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) { return Builtin_Summary(args, names, env, 3); }
+    RValuePtr Builtin_All(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) { return Builtin_Summary(args, names, env, 4); }
     
-    RValuePtr Builtin_Mean(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Mean(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.empty()) return RR_Nil();
         RValuePtr narm_arg = GetArg(args, names, "na.rm", 1, nullptr);
         bool na_rm = narm_arg ? IsTrue(narm_arg) : false;
@@ -2568,7 +2578,7 @@ namespace Evaluator {
     }
 
     // sort(x, decreasing = FALSE, na.last = TRUE, ...)  na.last: TRUE=last, FALSE=first, NA=remove
-    RValuePtr Builtin_Sort(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Sort(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         RValuePtr dec_arg = GetArg(args, names, "decreasing", 1, nullptr);
@@ -2585,10 +2595,10 @@ namespace Evaluator {
         int n = x->Length();
         auto res = std::make_shared<RValue>(x->type);
         if (x->type == RType::CHARACTER) {
-            std::vector<std::pair<std::string, int>> paired;
+            MiniVector<std::pair<MiniString, int>> paired;
             for (int i = 0; i < n; ++i) paired.push_back({x->s_vec[i], i});
             bool na_at_end = (na_last == 1);
-            auto cmp = [decreasing, na_at_end](const std::pair<std::string, int>& a, const std::pair<std::string, int>& b) {
+            auto cmp = [decreasing, na_at_end](const std::pair<MiniString, int>& a, const std::pair<MiniString, int>& b) {
                 bool a_na = (a.first.empty() || a.first == "NA"), b_na = (b.first.empty() || b.first == "NA");
                 if (a_na && b_na) return false;
                 if (a_na) return !na_at_end;   // a "less than" b only when we want NA first
@@ -2602,7 +2612,7 @@ namespace Evaluator {
             }
             return res;
         }
-        std::vector<std::pair<double, int>> paired;
+        MiniVector<std::pair<double, int>> paired;
         for (int i = 0; i < n; ++i) paired.push_back({x->GetDouble(i), i});
         if (na_last == -1) {
             paired.erase(std::remove_if(paired.begin(), paired.end(), [](const std::pair<double, int>& p) { return std::isnan(p.first); }), paired.end());
@@ -2626,13 +2636,13 @@ namespace Evaluator {
     }
 
     // order(...) - returns integer permutation (1-based) so x[order(x)] is sorted
-    RValuePtr Builtin_Order(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Order(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         RValuePtr dec_arg = GetArg(args, names, "decreasing", 1, nullptr);
         bool decreasing = dec_arg ? IsTrue(dec_arg) : false;
         int n = x->Length();
-        std::vector<std::pair<double, int>> paired;
+        MiniVector<std::pair<double, int>> paired;
         for (int i = 0; i < n; ++i) paired.push_back({x->GetDouble(i), i});
         auto cmp = [decreasing](const std::pair<double, int>& a, const std::pair<double, int>& b) {
             bool a_na = std::isnan(a.first), b_na = std::isnan(b.first);
@@ -2649,15 +2659,15 @@ namespace Evaluator {
     }
 
     // rank(x, na.last = TRUE, ties.method = "average")  ties.method: "average", "min", "max", "first"
-    RValuePtr Builtin_Rank(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Rank(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         RValuePtr ties_arg = GetArg(args, names, "ties.method", 2, nullptr);
-        std::string ties_method = "average";
+        MiniString ties_method = "average";
         if (ties_arg && ties_arg->type == RType::CHARACTER && ties_arg->Length() > 0)
             ties_method = ties_arg->s_vec[0];
         int n = x->Length();
-        std::vector<std::pair<double, int>> paired;
+        MiniVector<std::pair<double, int>> paired;
         for (int i = 0; i < n; ++i) paired.push_back({x->GetDouble(i), i});
         auto cmp = [](const std::pair<double, int>& a, const std::pair<double, int>& b) {
             if (std::isnan(a.first) && std::isnan(b.first)) return a.second < b.second;
@@ -2693,7 +2703,7 @@ namespace Evaluator {
     }
 
     // max.col(m, ties.method = "random") - index of max in each row (1-based)
-    RValuePtr Builtin_MaxCol(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_MaxCol(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.empty() || !args[0]->attributes.count("dim")) return RR_Nil();
         RValuePtr m = args[0];
         int nr = m->attributes["dim"]->GetInt(0);
@@ -2712,7 +2722,7 @@ namespace Evaluator {
     }
 
     // rowSums(x, na.rm = FALSE) / colSums(x, na.rm = FALSE)
-    static RValuePtr Builtin_RowColOp(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env, bool row_op, bool do_mean) {
+    static RValuePtr Builtin_RowColOp(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env, bool row_op, bool do_mean) {
         if (args.empty()) return RR_Nil();
         RValuePtr x = args[0];
         RValuePtr narm_arg = GetArg(args, names, "na.rm", 1, nullptr);
@@ -2756,18 +2766,18 @@ namespace Evaluator {
         }
         return res;
     }
-    RValuePtr Builtin_RowSums(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) { return Builtin_RowColOp(args, names, env, true, false); }
-    RValuePtr Builtin_ColSums(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) { return Builtin_RowColOp(args, names, env, false, false); }
-    RValuePtr Builtin_RowMeans(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) { return Builtin_RowColOp(args, names, env, true, true); }
-    RValuePtr Builtin_ColMeans(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) { return Builtin_RowColOp(args, names, env, false, true); }
+    RValuePtr Builtin_RowSums(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) { return Builtin_RowColOp(args, names, env, true, false); }
+    RValuePtr Builtin_ColSums(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) { return Builtin_RowColOp(args, names, env, false, false); }
+    RValuePtr Builtin_RowMeans(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) { return Builtin_RowColOp(args, names, env, true, true); }
+    RValuePtr Builtin_ColMeans(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) { return Builtin_RowColOp(args, names, env, false, true); }
 
     // x$name - extract element by name from list/data.frame
-    RValuePtr Builtin_Dollar(const std::vector<RValuePtr>& args, const std::vector<std::string>& names, RValuePtr env) {
+    RValuePtr Builtin_Dollar(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if (args.size() < 2) return RR_Nil();
         RValuePtr x = args[0];
         RValuePtr name_val = args[1];
         if (x->type != RType::LIST && !x->attributes.count("class")) return RR_Nil();
-        std::string key;
+        MiniString key;
         if (name_val->type == RType::SYMBOL) key = name_val->sym_name;
         else if (name_val->type == RType::CHARACTER && name_val->Length() > 0) key = name_val->s_vec[0];
         else return RR_Nil();
@@ -2939,11 +2949,11 @@ namespace Evaluator {
                          if (exp->l_vec.size() != 3) return RR_Error("Bad assignment");
                          RValuePtr lhs = exp->l_vec[1];
                          RValuePtr val = Eval(exp->l_vec[2], env);
-                         if (val->type == RType::ERROR) return val;
-                         std::string target_name;
-                         RValuePtr x;
-                         std::string sub_op;
-                         std::vector<RValuePtr> index_vals;
+                        if (val->type == RType::ERROR) return val;
+                        MiniString target_name;
+                        RValuePtr x;
+                        MiniString sub_op;
+                        MiniVector<RValuePtr> index_vals;
                          if (lhs->type == RType::SYMBOL) {
                              target_name = lhs->sym_name;
                              Define(target_name, val, env);
@@ -2967,7 +2977,7 @@ namespace Evaluator {
                                          index_vals.push_back(idx);
                                      }
                                  }
-                                 std::string err;
+                                 MiniString err;
                                  RValuePtr modified = SubAssign(x, sub_op, index_vals, val, err);
                                  if (!err.empty()) return RR_Error(err);
                                  if (!modified) return RR_Error("subassignment failed");
@@ -2980,7 +2990,7 @@ namespace Evaluator {
                     if (head->sym_name == "if") {
                         // (if cond then else)
                         RValuePtr cond = Eval(exp->l_vec[1], env);
-                        std::string cerr;
+                        MiniString cerr;
                         bool c = ConditionToBoolOrError(cond, cerr);
                         if (!cerr.empty()) return RR_Error(cerr);
                         if (c) return Eval(exp->l_vec[2], env);
@@ -2994,7 +3004,7 @@ namespace Evaluator {
                         RValuePtr last = RR_Nil();
                         while(true) {
                             RValuePtr cond = Eval(cond_expr, env);
-                            std::string cerr;
+                            MiniString cerr;
                             bool c = ConditionToBoolOrError(cond, cerr);
                             if (!cerr.empty()) return RR_Error(cerr);
                             if (!c) break;
@@ -3007,7 +3017,7 @@ namespace Evaluator {
                         RValuePtr body = exp->l_vec[3];
                         RValuePtr seq = Eval(seq_expr, env);
                         if (seq->type == RType::ERROR) return seq;
-                        std::string var_name = exp->l_vec[1]->sym_name;
+                        MiniString var_name = exp->l_vec[1]->sym_name;
                         RValuePtr last = RR_Nil();
                         int n = seq->Length();
                         for(int i=0; i<n; ++i) {
@@ -3042,8 +3052,8 @@ namespace Evaluator {
                 if (func->type == RType::ERROR) return func;
                 
                 // Eval Args
-                std::vector<RValuePtr> args;
-                std::vector<std::string> arg_names;
+                MiniVector<RValuePtr> args;
+                MiniVector<MiniString> arg_names;
                 
                 // Check if call has "names"
                 RValuePtr names_attr = nullptr;
@@ -3075,7 +3085,7 @@ namespace Evaluator {
                     RValuePtr formals = func->formals;
                     for (size_t i = 0; i < formals->l_vec.size(); ++i) {
                         RValuePtr sym = formals->l_vec[i];
-                        std::string name = sym->sym_name;
+                        MiniString name = sym->sym_name;
                         RValuePtr val = GetArg(args, arg_names, name, (int)i, RR_Nil());
                         Define(name, val, new_env);
                     }
@@ -3093,30 +3103,27 @@ namespace Evaluator {
 
 
     // --- TO STRING ---
-    std::string ToString(RValuePtr v) {
+    MiniString ToString(RValuePtr v) {
         if (!v) return "NULL";
         if (v->type == RType::NIL) return "NULL";
         if (v->type == RType::ERROR) return "Error: " + v->sym_name;
         
-        auto fmtDouble = [](double d) -> std::string {
+        auto fmtDouble = [](double d) -> MiniString {
             if (IsNAReal(d)) return "NA";
             if (std::isnan(d)) return "NaN";
             if (std::isinf(d)) return d > 0 ? "Inf" : "-Inf";
-            std::ostringstream oss;
-            oss.setf(std::ios::fmtflags(0), std::ios::floatfield);
-            oss << std::setprecision(7) << d;
-            return oss.str();
+            return MiniToString(d);
         };
-        auto fmtInt = [](int x) -> std::string {
+        auto fmtInt = [](int x) -> MiniString {
             if (x == R_INT_NA) return "NA";
-            return std::to_string(x);
+            return MiniToString(x);
         };
-        auto fmtLgl = [](int x) -> std::string {
+        auto fmtLgl = [](int x) -> MiniString {
             if (x == R_LOGICAL_NA) return "NA";
             return x ? "TRUE" : "FALSE";
         };
 
-        std::string s = "";
+        MiniString s = "";
         
         // data.frame: pretty print like a simple 2D table
         if (v->type == RType::LIST && HasClass(v, "data.frame")) {
@@ -3131,13 +3138,15 @@ namespace Evaluator {
                 if (names_attr && names_attr->type == RType::CHARACTER && j < names_attr->Length())
                     s += names_attr->s_vec[j];
                 else
-                    s += "V" + std::to_string(j+1);
+                    s += "V";
+                    s += MiniToString(j+1);
             }
             s += "\n";
 
             // Rows
             for (int i = 0; i < nrow; ++i) {
-                s += std::to_string(i+1) + " ";
+                s += MiniToString(i+1);
+                s += " ";
                 for (int j = 0; j < ncol; ++j) {
                     if (j) s += " ";
                     RValuePtr col = v->l_vec[j];
@@ -3160,7 +3169,9 @@ namespace Evaluator {
                 int nr = dim->GetInt(0), nc = dim->GetInt(1);
                 if (nr > 0 && nc > 0 && nr * nc == v->Length()) {
                     for (int r = 0; r < nr; ++r) {
-                        s += "[" + std::to_string(r+1) + ",] ";
+                        s += "[";
+                        s += MiniToString(r+1);
+                        s += ",] ";
                         for (int c = 0; c < nc; ++c) {
                             int flat = c * nr + r;
                             if (c > 0) s += " ";
@@ -3172,8 +3183,8 @@ namespace Evaluator {
                         s += "\n";
                     }
                     // Header row: [,1] [,2] ...
-                    std::string header = "     ";
-                    for (int c = 0; c < nc; ++c) { if (c) header += " "; header += "[," + std::to_string(c+1) + "]"; }
+                    MiniString header = "     ";
+                    for (int c = 0; c < nc; ++c) { if (c) header += " "; header += "[,"; header += MiniToString(c+1); header += "]"; }
                     s = header + "\n" + s;
                     return s;
                 }
@@ -3195,7 +3206,9 @@ namespace Evaluator {
         
         if (v->type == RType::LIST) {
             for(int i=0; i<v->Length(); ++i) {
-                s += "[[" + std::to_string(i+1) + "]]\n";
+                s += "[[";
+                s += MiniToString(i+1);
+                s += "]]\n";
                 s += ToString(v->l_vec[i]) + "\n";
             }
             return s;

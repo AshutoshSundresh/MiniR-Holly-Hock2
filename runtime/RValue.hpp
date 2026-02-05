@@ -1,6 +1,5 @@
 #pragma once
-#include <vector>
-#include <string>
+#include "Containers.hpp"
 #include <memory>
 #include <map>
 #include <cmath>
@@ -24,7 +23,7 @@ struct RValue;
 using RValuePtr = std::shared_ptr<RValue>;
 
 // Forward decl for Builtin function pointer
-using BuiltinFunc = RValuePtr (*)(const std::vector<RValuePtr>& args, const std::vector<std::string>& arg_names, RValuePtr env);
+using BuiltinFunc = RValuePtr (*)(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& arg_names, RValuePtr env);
 
 // NA constants (before RValue so GetDouble/GetInt can use them)
 const int R_INT_NA = -2147483648;
@@ -34,16 +33,16 @@ struct RValue {
     RType type;
     
     // Data storage (using vectors for typical R vectorized types)
-    std::vector<int> i_vec; // Stores LOGICAL (0=FALSE, 1=TRUE, -1=NA) and INTEGER
-    std::vector<double> d_vec;
-    std::vector<std::string> s_vec;
-    std::vector<RValuePtr> l_vec; // For generic lists
+    MiniVector<int> i_vec; // Stores LOGICAL (0=FALSE, 1=TRUE, -1=NA) and INTEGER
+    MiniVector<double> d_vec;
+    MiniVector<MiniString> s_vec;
+    MiniVector<RValuePtr> l_vec; // For generic lists
     
     // Attributes (names, class, dim, etc.)
-    std::map<std::string, RValuePtr> attributes;
+    std::map<MiniString, RValuePtr> attributes;
     
     // Specific fields
-    std::string sym_name; // For SYMBOL or ERROR message
+    MiniString sym_name; // For SYMBOL or ERROR message
     
     // Closure fields
     RValuePtr formals;
@@ -54,7 +53,7 @@ struct RValue {
     BuiltinFunc builtin = nullptr;
     
     // Environment specific
-    std::map<std::string, RValuePtr> frame;
+    std::map<MiniString, RValuePtr> frame;
     RValuePtr parent_env;
 
     // Generic helpers
@@ -93,7 +92,7 @@ struct RValue {
 
 // Helpers for creation
 inline RValuePtr RR_Nil() { return std::make_shared<RValue>(RType::NIL); }
-inline RValuePtr RR_Error(const std::string& msg) { 
+inline RValuePtr RR_Error(const MiniString& msg) { 
     auto r = std::make_shared<RValue>(RType::ERROR); 
     r->sym_name = msg; 
     return r; 

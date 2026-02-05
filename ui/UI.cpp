@@ -27,8 +27,29 @@ void UI::Update() {
     
     // Check for pending command
     if (console.HasPendingCommand()) {
-        std::string src = console.PopPendingCommand();
-        while (!src.empty() && (src.back() == '\n' || src.back() == '\r')) src.pop_back();
+        MiniString src = console.PopPendingCommand();
+        while (!src.empty() && (src[src.size() - 1] == '\n' || src[src.size() - 1] == '\r')) {
+            // emulate pop_back
+            // (size is decreased inside helper)
+            // easier: create a trimmed copy
+            break;
+        }
+        // Simple trim of trailing newline/CR
+        while (!src.empty()) {
+            char last = src[src.size() - 1];
+            if (last == '\n' || last == '\r') {
+                // manual pop_back
+                // (MiniString::push_back/clear used elsewhere; here we reconstruct)
+                // Not super efficient but fine for small lines:
+                MiniString trimmed;
+                for (std::size_t i = 0; i + 1 < src.size(); ++i) {
+                    trimmed.push_back(src[i]);
+                }
+                src = trimmed;
+            } else {
+                break;
+            }
+        }
         if (src == "cls") {
             console.Clear();
         } else {
@@ -41,9 +62,11 @@ void UI::Update() {
             } else {
                 RValuePtr res = Evaluator::Eval(ast, global_env);
                 if (res && res->type == RType::ERROR) {
-                    console.PrintLine(("Error: " + res->sym_name).c_str());
+                    MiniString msg("Error: ");
+                    msg += res->sym_name;
+                    console.PrintLine(msg.c_str());
                 } else if (res && res->type != RType::NIL) {
-                    std::string out = Evaluator::ToString(res);
+                    MiniString out = Evaluator::ToString(res);
                     if (!out.empty()) console.PrintLine(out.c_str());
                 }
             }

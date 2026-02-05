@@ -5,7 +5,7 @@ namespace {
     // Very small “is input complete?” heuristic for on-device multiline:
     // track (), {}, [] balance and ignore anything inside single/double quotes.
     // This is not a full R parser, but it handles the common { ... } case.
-    int BalanceDelims(const std::string& s) {
+    int BalanceDelims(const MiniString& s) {
         int paren = 0, brace = 0, bracket = 0;
         bool in_single = false, in_double = false;
         for (size_t i = 0; i < s.size(); ++i) {
@@ -50,7 +50,9 @@ void Console::Enter() {
     const bool was_at_bottom = (scroll_offset >= (int)scrollback.size() - LINES_PER_SCREEN);
 
     const char* active_prompt = input_accumulator.empty() ? "> " : "+ ";
-    scrollback.push_back(std::string(active_prompt) + current_line);
+    MiniString line(active_prompt);
+    line += current_line;
+    scrollback.push_back(line);
 
     // Enforce MAX_LINES
     while ((int)scrollback.size() > MAX_LINES) {
@@ -59,7 +61,7 @@ void Console::Enter() {
     }
 
     // Accumulate multi-line input
-    std::string combined = input_accumulator;
+    MiniString combined = input_accumulator;
     combined += current_line;
     combined += "\n";
 
@@ -131,7 +133,8 @@ void Console::Draw() {
     // Let's pin it to a fixed row, say row 10
     int input_row = LINES_PER_SCREEN + 2;
     const char* active_prompt = input_accumulator.empty() ? "> " : "+ ";
-    std::string line_view = std::string(active_prompt) + current_line;
+    MiniString line_view(active_prompt);
+    line_view += current_line;
     
     // Blinking cursor simulation? 
     line_view += "_";

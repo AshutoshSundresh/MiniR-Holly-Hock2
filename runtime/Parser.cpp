@@ -1,5 +1,4 @@
 #include "Parser.hpp"
-#include <iostream>
 
 // Precedence levels
 enum Precedence {
@@ -16,7 +15,7 @@ enum Precedence {
     PREC_CALL,       // ( [ $
 };
 
-Parser::Parser(const std::vector<Token>& tokens) : tokens(tokens) {
+Parser::Parser(const MiniVector<Token>& tokens) : tokens(tokens) {
     pos = 0;
 }
 
@@ -41,14 +40,23 @@ bool Parser::Match(TokenType t) {
     return false;
 }
 
-Token Parser::Consume(TokenType t, const std::string& msg) {
+Token Parser::Consume(TokenType t, const MiniString& msg) {
     if (Check(t)) {
         Token tok = Current();
         Advance();
         return tok;
     }
     error_state = true;
-    error_msg = msg + " at line " + std::to_string(Current().line);
+    error_msg = msg;
+    error_msg += " at line ";
+    char buf[16];
+    int line_no = Current().line;
+#if defined(_MSC_VER)
+    _snprintf_s(buf, sizeof(buf), _TRUNCATE, "%d", line_no);
+#else
+    std::snprintf(buf, sizeof(buf), "%d", line_no);
+#endif
+    error_msg += buf;
     return Token{TokenType::eof, "", 0, 0};
 }
 
@@ -163,7 +171,10 @@ RValuePtr Parser::ParseExpression(int precedence) {
 RValuePtr Parser::ParsePrimary() {
     if (Check(TokenType::invalid)) {
         error_state = true;
-        error_msg = "Invalid token: '" + Current().text + "' at line " + std::to_string(Current().line);
+        error_msg = "Invalid token: '";
+        error_msg += Current().text;
+        error_msg += "' at line ";
+        error_msg += MiniToString(Current().line);
         return RR_Nil();
     }
     if (Match(TokenType::bang)) {

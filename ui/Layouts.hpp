@@ -1,8 +1,8 @@
 #pragma once
-#include <vector>
-
+#include "../runtime/Containers.hpp"
+ 
 enum class KeyType { Character, Command, TabSwitch };
-
+ 
 struct Key {
     const char* label;
     const char* value;
@@ -10,8 +10,8 @@ struct Key {
     int width_mult;
     int command_id;
 };
-
-using KeyGrid = std::vector<std::vector<Key>>;
+ 
+using KeyGrid = MiniVector<MiniVector<Key>>;
 
 enum {
     CMD_NONE = 0,

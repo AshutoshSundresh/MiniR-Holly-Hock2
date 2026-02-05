@@ -1,8 +1,11 @@
 #include "Lexer.hpp"
 #include <cctype>
+#include <cstdlib>
+#include <cerrno>
 
-Lexer::Lexer(const std::string& src) : src(src) {
-    len = src.length();
+Lexer::Lexer(const MiniString& src) : src(src) {
+    // MiniString is null-terminated, but we track logical length.
+    len = static_cast<int>(src.size());
 }
 
 char Lexer::Current() const {
@@ -36,8 +39,8 @@ void Lexer::SkipWhitespace() {
     }
 }
 
-std::vector<Token> Lexer::Tokenize() {
-    std::vector<Token> tokens;
+MiniVector<Token> Lexer::Tokenize() {
+    MiniVector<Token> tokens;
     pos = 0;
     line = 1;
     
@@ -61,27 +64,28 @@ Token Lexer::ScanToken() {
     if (isalpha(c) || c == '.') {
         // R allows leading-dot numbers like `.5`
         if (c == '.' && isdigit(Peek())) {
-            std::string text;
-            text += '.';
+            MiniString text(".");
             Advance();
             while (isdigit(Current()) || Current() == '.') {
-                text += Current();
+                text.push_back(Current());
                 Advance();
             }
-        t.type = TokenType::number;
-        t.text = text;
-        try {
-            t.num_val = std::stod(text);
-        } catch (...) {
-            // R: malformed numeric literal should be a parse error, not silently NaN.
-            t.type = TokenType::invalid;
-        }
-        return t;
+            t.type = TokenType::number;
+            t.text = text;
+            errno = 0;
+            char* endp = nullptr;
+            double val = std::strtod(text.c_str(), &endp);
+            if (endp == text.c_str() || errno == ERANGE) {
+                t.type = TokenType::invalid;
+            } else {
+                t.num_val = val;
+            }
+            return t;
         }
 
-        std::string text;
+        MiniString text;
         while (isalnum(Current()) || Current() == '.' || Current() == '_') {
-            text += Current();
+            text.push_back(Current());
             Advance();
         }
         t.text = text;
@@ -99,17 +103,20 @@ Token Lexer::ScanToken() {
     
     // Number
     if (isdigit(c)) {
-        std::string text;
+        MiniString text;
         while (isdigit(Current()) || Current() == '.') {
-            text += Current();
+            text.push_back(Current());
             Advance();
         }
         t.type = TokenType::number;
         t.text = text;
-        try {
-            t.num_val = std::stod(text);
-        } catch (...) {
+        errno = 0;
+        char* endp = nullptr;
+        double val = std::strtod(text.c_str(), &endp);
+        if (endp == text.c_str() || errno == ERANGE) {
             t.type = TokenType::invalid;
+        } else {
+            t.num_val = val;
         }
         return t;
     }
@@ -118,9 +125,9 @@ Token Lexer::ScanToken() {
     if (c == '"' || c == '\'') {
         char quote = c;
         Advance();
-        std::string text;
+        MiniString text;
         while (Current() != quote && Current() != '\0') {
-            text += Current();
+            text.push_back(Current());
             Advance();
         }
         if (Current() == quote) Advance();
@@ -131,7 +138,8 @@ Token Lexer::ScanToken() {
     
     // Operators
     Advance(); // Default advance for single chars
-    t.text = std::string(1, c);
+    char tmp[2] = { c, '\0' };
+    t.text = MiniString(tmp);
     
     switch (c) {
         case '+': t.type = TokenType::plus; break;
@@ -180,13 +188,13 @@ Token Lexer::ScanToken() {
         case '%':
              // Special operators %...%
              {
-                 std::string op = "%";
+                 MiniString op("%");
                  while (Current() != '%' && Current() != '\0') {
-                     op += Current();
+                     op.push_back(Current());
                      Advance();
                  }
                  if (Current() == '%') {
-                     op += '%';
+                     op.push_back('%');
                      Advance();
                      t.text = op;
                      if (op == "%%") t.type = TokenType::mod;

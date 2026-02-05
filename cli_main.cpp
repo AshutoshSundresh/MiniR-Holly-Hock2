@@ -1,6 +1,4 @@
 #include <iostream>
-#include <string>
-#include <vector>
 
 #include "runtime/Evaluator.hpp"
 #include "runtime/Parser.hpp"
@@ -10,7 +8,7 @@
 // Assuming it is exposed in Evaluator.hpp as verified.
 
 namespace {
-    int BalanceDelims(const std::string& s) {
+    int BalanceDelims(const MiniString& s) {
         int paren = 0, brace = 0, bracket = 0;
         bool in_single = false, in_double = false;
         for (size_t i = 0; i < s.size(); ++i) {
@@ -40,12 +38,18 @@ int main() {
     auto env = std::make_shared<RValue>(RType::ENV);
     Evaluator::InitGlobalEnv(env);
 
-    std::string acc;
+    MiniString acc;
 
     while (true) {
         std::cout << (acc.empty() ? "> " : "+ ");
-        std::string line;
-        if (!std::getline(std::cin, line)) break;
+        MiniString line;
+        while (true) {
+            int ch = std::cin.get();
+            if (!std::cin) break;
+            if (ch == '\n') break;
+            line.push_back(static_cast<char>(ch));
+        }
+        if (!std::cin && line.empty()) break;
         if (line == "exit" || line == "quit" || line == "q()") break;
         if (line.empty() && acc.empty()) continue;
 
@@ -72,7 +76,7 @@ int main() {
             // Let's assume it returns one RValuePtr.
             
             if (parser.HasError()) {
-                std::cout << "Error: " << parser.GetError() << std::endl;
+                std::cout << "Error: " << parser.GetError().c_str() << std::endl;
                 acc.clear();
                 continue;
             }
@@ -84,12 +88,12 @@ int main() {
                 if (result) {
                      // Check for error
                      if (result->type == RType::ERROR) {
-                         std::cout << "Error: " << result->sym_name << std::endl;
+                         std::cout << "Error: " << result->sym_name.c_str() << std::endl;
                      } else {
-                         std::string s = Evaluator::ToString(result);
+                         MiniString s = Evaluator::ToString(result);
                          // R doesn't print invisible returns usually, but for REPL we print.
                          // Check if result is NOT NULL or we print [1] ...
-                         if (!s.empty()) std::cout << s << std::endl;
+                         if (!s.empty()) std::cout << s.c_str() << std::endl;
                      }
                 }
             }

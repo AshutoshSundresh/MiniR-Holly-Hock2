@@ -1,6 +1,5 @@
 #pragma once
-#include <vector>
-#include <string>
+#include "../runtime/Containers.hpp"
 #include <sdk/os/lcd.hpp>
 
 class Console {
@@ -19,21 +18,21 @@ public:
     void Print(const char* str);
     void PrintLine(const char* str);
     
-    std::string GetInputBuffer() const { return input_accumulator + current_line; }
+    MiniString GetInputBuffer() const { return input_accumulator + current_line; }
     
     // Command Interface
     bool HasPendingCommand() const { return !pending_command.empty(); }
-    std::string PopPendingCommand() { 
-        std::string s = pending_command; 
+    MiniString PopPendingCommand() { 
+        MiniString s = pending_command; 
         pending_command = ""; 
         return s; 
     }
 
 private:
-    std::vector<std::string> scrollback;
-    std::string input_accumulator; // For multi-line pending statements
-    std::string current_line;
-    std::string pending_command; // Ready to execute
+    MiniVector<MiniString> scrollback;
+    MiniString input_accumulator; // For multi-line pending statements
+    MiniString current_line;
+    MiniString pending_command; // Ready to execute
     const char* prompt = "> ";
     
     int scroll_offset = 0;

@@ -1,7 +1,6 @@
 #pragma once
-#include <string>
-#include <vector>
-
+#include "Containers.hpp"
+ 
 enum class TokenType {
     eof,
     identifier,
@@ -30,18 +29,18 @@ enum class TokenType {
 
 struct Token {
     TokenType type;
-    std::string text;
+    MiniString text;
     double num_val = 0.0;
     int line = 0;
 };
 
 class Lexer {
 public:
-    Lexer(const std::string& src);
-    std::vector<Token> Tokenize();
+    Lexer(const MiniString& src);
+    MiniVector<Token> Tokenize();
     
 private:
-    std::string src;
+    MiniString src;
     int pos = 0;
     int len = 0;
     int line = 1;
