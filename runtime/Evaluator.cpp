@@ -3,8 +3,6 @@
 #include <cmath>
 #include <algorithm>
 #include <random>
-#include <sstream>
-#include <iomanip>
 #include <set>
 #include <cstdint>
 #include <cstring>
@@ -73,7 +71,7 @@ namespace Evaluator {
         if (v->type == RType::CHARACTER) {
             if (i < 0 || i >= (int)v->s_vec.size()) return 0;
             MiniString s = v->s_vec[i];
-            for (std::size_t idx = 0; idx < s.size(); ++idx) {
+            for (size_t idx = 0; idx < s.size(); ++idx) {
                 char ch = s[idx];
                 s[idx] = (char)std::toupper((unsigned char)ch);
             }

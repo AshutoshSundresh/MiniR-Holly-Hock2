@@ -4,7 +4,7 @@
 // MiniVector is a small dynamic array replacement for std::vector.
 // MiniString is a tiny owning string type for the runtime.
 
-#include <cstddef>
+#include <stddef.h>
 #include <initializer_list>
 #include <utility>
 #include <new>
@@ -18,10 +18,10 @@ class MiniVector {
 public:
     MiniVector() : _data(nullptr), _size(0), _capacity(0) {}
 
-    explicit MiniVector(std::size_t n)
+    explicit MiniVector(size_t n)
         : _data(nullptr), _size(0), _capacity(0) {
         reserve(n);
-        for (std::size_t i = 0; i < n; ++i) {
+        for (size_t i = 0; i < n; ++i) {
             new(&_data[i]) T();
         }
         _size = n;
@@ -29,7 +29,7 @@ public:
 
     MiniVector(std::initializer_list<T> init)
         : MiniVector(init.size()) {
-        std::size_t i = 0;
+        size_t i = 0;
         for (const auto& v : init) {
             _data[i++] = v;
         }
@@ -37,7 +37,7 @@ public:
 
     MiniVector(const MiniVector& other)
         : MiniVector(other._size) {
-        for (std::size_t i = 0; i < _size; ++i) {
+        for (size_t i = 0; i < _size; ++i) {
             _data[i] = other._data[i];
         }
     }
@@ -76,11 +76,11 @@ public:
         destroy();
     }
 
-    std::size_t size() const { return _size; }
+    size_t size() const { return _size; }
     bool empty() const { return _size == 0; }
 
-    T& operator[](std::size_t i) { return _data[i]; }
-    const T& operator[](std::size_t i) const { return _data[i]; }
+    T& operator[](size_t i) { return _data[i]; }
+    const T& operator[](size_t i) const { return _data[i]; }
 
     T& back() { return _data[_size - 1]; }
     const T& back() const { return _data[_size - 1]; }
@@ -94,16 +94,16 @@ public:
     const T* end() const { return _data + _size; }
 
     void clear() {
-        for (std::size_t i = 0; i < _size; ++i) {
+        for (size_t i = 0; i < _size; ++i) {
             _data[i].~T();
         }
         _size = 0;
     }
 
-    void resize(std::size_t n) {
+    void resize(size_t n) {
         if (n < _size) {
             // Destroy extra elements
-            for (std::size_t i = n; i < _size; ++i) {
+            for (size_t i = n; i < _size; ++i) {
                 _data[i].~T();
             }
             _size = n;
@@ -111,16 +111,16 @@ public:
         }
         if (n > _size) {
             reserve(n);
-            for (std::size_t i = _size; i < n; ++i) {
+            for (size_t i = _size; i < n; ++i) {
                 new(&_data[i]) T();
             }
             _size = n;
         }
     }
 
-    void resize(std::size_t n, const T& value) {
+    void resize(size_t n, const T& value) {
         if (n < _size) {
-            for (std::size_t i = n; i < _size; ++i) {
+            for (size_t i = n; i < _size; ++i) {
                 _data[i].~T();
             }
             _size = n;
@@ -128,7 +128,7 @@ public:
         }
         if (n > _size) {
             reserve(n);
-            for (std::size_t i = _size; i < n; ++i) {
+            for (size_t i = _size; i < n; ++i) {
                 new(&_data[i]) T(value);
             }
             _size = n;
@@ -160,9 +160,9 @@ public:
     // Very small erase implementation used only with begin() in this project.
     T* erase(T* it) {
         if (it < _data || it >= _data + _size) return it;
-        std::size_t idx = static_cast<std::size_t>(it - _data);
+        size_t idx = static_cast<size_t>(it - _data);
         _data[idx].~T();
-        for (std::size_t i = idx; i + 1 < _size; ++i) {
+        for (size_t i = idx; i + 1 < _size; ++i) {
             new(&_data[i]) T(std::move(_data[i + 1]));
             _data[i + 1].~T();
         }
@@ -182,21 +182,21 @@ public:
     template<typename InputIt>
     T* insert(T* pos, InputIt first, InputIt last) {
         if (pos < _data || pos > _data + _size) return pos;
-        std::size_t idx = static_cast<std::size_t>(pos - _data);
-        std::size_t count = 0;
+        size_t idx = static_cast<size_t>(pos - _data);
+        size_t count = 0;
         for (InputIt it = first; it != last; ++it) ++count;
         if (count == 0) return _data + idx;
 
         reserve(_size + count);
 
         // Move tail elements up to make room
-        for (std::size_t i = _size; i > idx; --i) {
+        for (size_t i = _size; i > idx; --i) {
             new(&_data[i + count - 1]) T(std::move(_data[i - 1]));
             _data[i - 1].~T();
         }
 
         // Copy new elements into the gap
-        std::size_t insert_pos = idx;
+        size_t insert_pos = idx;
         for (InputIt it = first; it != last; ++it) {
             new(&_data[insert_pos++]) T(*it);
         }
@@ -205,10 +205,10 @@ public:
         return _data + idx;
     }
 
-    void reserve(std::size_t new_cap) {
+    void reserve(size_t new_cap) {
         if (new_cap <= _capacity) return;
         T* new_data = static_cast<T*>(operator new[](new_cap * sizeof(T)));
-        for (std::size_t i = 0; i < _size; ++i) {
+        for (size_t i = 0; i < _size; ++i) {
             new(&new_data[i]) T(std::move(_data[i]));
             _data[i].~T();
         }
@@ -226,8 +226,8 @@ private:
     }
 
     T* _data;
-    std::size_t _size;
-    std::size_t _capacity;
+    size_t _size;
+    size_t _capacity;
 };
 
 // ---- MiniString ----------------------------------------------------------
@@ -238,7 +238,7 @@ public:
 
     MiniString(const char* s) : _data(nullptr), _size(0), _capacity(0) {
         if (s) {
-            std::size_t len = std::strlen(s);
+            size_t len = std::strlen(s);
             reserve(len + 1);
             std::memcpy(_data, s, len + 1);
             _size = len;
@@ -288,7 +288,7 @@ public:
     MiniString& operator=(const char* s) {
         clear();
         if (s) {
-            std::size_t len = std::strlen(s);
+            size_t len = std::strlen(s);
             reserve(len + 1);
             std::memcpy(_data, s, len + 1);
             _size = len;
@@ -300,8 +300,8 @@ public:
         if (_data) delete[] _data;
     }
 
-    std::size_t size() const { return _size; }
-    std::size_t length() const { return _size; }
+    size_t size() const { return _size; }
+    size_t length() const { return _size; }
     bool empty() const { return _size == 0; }
 
     const char* c_str() const {
@@ -320,15 +320,15 @@ public:
         return _data;
     }
 
-    char& operator[](std::size_t i) { return data()[i]; }
-    const char& operator[](std::size_t i) const { return c_str()[i]; }
+    char& operator[](size_t i) { return data()[i]; }
+    const char& operator[](size_t i) const { return c_str()[i]; }
 
     void clear() {
         _size = 0;
         if (_data) _data[0] = '\0';
     }
 
-    void reserve(std::size_t new_cap) {
+    void reserve(size_t new_cap) {
         if (new_cap <= _capacity) return;
         char* new_data = new char[new_cap];
         if (_data && _capacity) {
@@ -352,7 +352,7 @@ public:
 
     MiniString& operator+=(const char* s) {
         if (!s || !*s) return *this;
-        std::size_t len = std::strlen(s);
+        size_t len = std::strlen(s);
         ensure_capacity(_size + len + 1);
         std::memcpy(_data + _size, s, len);
         _size += len;
@@ -386,15 +386,15 @@ public:
     }
 
     // Simple search used by some code to trim trailing characters.
-    std::size_t find_last_not_of(char ch) const {
-        if (_size == 0) return static_cast<std::size_t>(-1);
-        for (std::size_t i = _size; i > 0; --i) {
+    size_t find_last_not_of(char ch) const {
+        if (_size == 0) return static_cast<size_t>(-1);
+        for (size_t i = _size; i > 0; --i) {
             if (_data[i - 1] != ch) return i - 1;
         }
-        return static_cast<std::size_t>(-1);
+        return static_cast<size_t>(-1);
     }
 
-    MiniString substr(std::size_t pos, std::size_t len) const {
+    MiniString substr(size_t pos, size_t len) const {
         if (pos > _size) pos = _size;
         if (pos + len > _size) len = _size - pos;
         MiniString out;
@@ -407,16 +407,16 @@ public:
     }
 
 private:
-    void ensure_capacity(std::size_t needed) {
+    void ensure_capacity(size_t needed) {
         if (needed <= _capacity) return;
-        std::size_t new_cap = _capacity ? _capacity * 2 : 16;
+        size_t new_cap = _capacity ? _capacity * 2 : 16;
         if (new_cap < needed) new_cap = needed;
         reserve(new_cap);
     }
 
     char* _data;
-    std::size_t _size;
-    std::size_t _capacity;
+    size_t _size;
+    size_t _capacity;
 };
 
 inline bool operator==(const MiniString& a, const MiniString& b) {
