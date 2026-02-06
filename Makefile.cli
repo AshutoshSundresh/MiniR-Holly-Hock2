@@ -1,17 +1,1 @@
-CXX = g++
-CXXFLAGS = -I. -std=c++17 -Wall -O2
-
-SRCS = cli_main.cpp runtime/Evaluator.cpp runtime/Parser.cpp runtime/Lexer.cpp
-OBJS = $(SRCS:.cpp=.o)
-TARGET = minir.exe
-
-all: $(TARGET)
-
-$(TARGET): $(OBJS)
-	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJS)
-
-%.o: %.cpp
-	$(CXX) $(CXXFLAGS) -c $< -o $@
-
-clean:
-	rm -f $(OBJS) $(TARGET)
+include Makefile
