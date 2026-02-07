@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -I. -std=c++17 -Wall -O2
+CXXFLAGS = -I. -std=c++20 -Wall -O2
 
 SRCS = cli_main.cpp runtime/Evaluator.cpp runtime/Parser.cpp runtime/Lexer.cpp
 OBJS = $(SRCS:.cpp=.o)
