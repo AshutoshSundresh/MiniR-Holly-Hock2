@@ -3,8 +3,6 @@
 #include "Containers.hpp"
 
 namespace Evaluator {
-    using Environment = RValue; // Alias
-    
     RValuePtr Eval(RValuePtr exp, RValuePtr env);
     void InitGlobalEnv(RValuePtr env);
     

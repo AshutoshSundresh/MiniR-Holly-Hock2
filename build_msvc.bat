@@ -34,16 +34,6 @@ if exist "%VS2026_PRE%" (
     goto :Build
 )
 
-set "VS2022_COMMUNITY=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
-if exist "%VS2022_PRO%" (
-    call "%VS2022_PRO%"
-    goto :Build
-)
-if exist "%VS2022_ENT%" (
-    call "%VS2022_ENT%"
-    goto :Build
-)
-
 echo.
 echo WARNING: Could not automatically find Visual Studio 2022.
 echo Attempting to check for VS 2019...

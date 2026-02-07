@@ -95,6 +95,8 @@ Token Lexer::ScanToken() {
         else if (text == "else") t.type = TokenType::keyword;
         else if (text == "function") t.type = TokenType::keyword;
         else if (text == "while") t.type = TokenType::keyword;
+        else if (text == "for") t.type = TokenType::keyword;
+        else if (text == "in") t.type = TokenType::keyword;
         else if (text == "TRUE" || text == "FALSE" || text == "NA" || text == "NULL") t.type = TokenType::keyword;
         else t.type = TokenType::identifier;
         

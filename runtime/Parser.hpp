@@ -6,7 +6,6 @@ class Parser {
 public:
     Parser(const MiniVector<Token>& tokens);
     RValuePtr Parse(); // Parses one expression or a block
-    bool IsComplete() const { return pos >= (int)tokens.size() || tokens[pos].type == TokenType::eof; }
     bool HasError() const { return error_state; }
     MiniString GetError() const { return error_msg; }
 
@@ -27,7 +26,6 @@ private:
     RValuePtr ParsePrimary();
     RValuePtr ParseBlock();
     RValuePtr ParseCall(RValuePtr callee);
-    RValuePtr ParseSubscript(RValuePtr left);
     
     // Helpers
     int GetPrecedence(TokenType t) const;

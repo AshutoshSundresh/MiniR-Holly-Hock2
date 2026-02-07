@@ -279,14 +279,24 @@ RValuePtr Parser::ParsePrimary() {
             return call;
         }
         if (t.text == "for") {
+            // Parse R-style for loop: for (i in expr) body
             Consume(TokenType::lparen, "Expect '(' after for");
             Token var_tok = Consume(TokenType::identifier, "Expect variable name in for");
-            Consume(TokenType::comma, "Expect ',' in for");
+
+            // Expect the 'in' keyword
+            if (!(Match(TokenType::keyword) && tokens[pos-1].text == "in")) {
+                error_state = true;
+                error_msg = "Expect 'in' in for";
+                return RR_Nil();
+            }
+
             RValuePtr seq_expr = ParseExpression();
             Consume(TokenType::rparen, "Expect ')'");
             RValuePtr body = ParseExpression();
+
             auto var_sym = std::make_shared<RValue>(RType::SYMBOL);
             var_sym->sym_name = var_tok.text;
+
             auto call = std::make_shared<RValue>(RType::LIST);
             auto func = std::make_shared<RValue>(RType::SYMBOL); func->sym_name = "for";
             call->l_vec.push_back(func);

@@ -3028,14 +3028,6 @@ namespace Evaluator {
                         }
                         return last;
                     }
-                    if (head->sym_name == "function") {
-                        // (function (args) body)
-                        auto closure = std::make_shared<RValue>(RType::CLOSURE);
-                        closure->formals = exp->l_vec[1];
-                        closure->body = exp->l_vec[2];
-                        closure->env = env; // Capture
-                        return closure;
-                    }
                     if (head->sym_name == "{") {
                         RValuePtr res = RR_Nil();
                         for(size_t i=1; i<exp->l_vec.size(); ++i) {

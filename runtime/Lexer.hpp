@@ -6,7 +6,7 @@ enum class TokenType {
     identifier,
     number,
     string,
-    keyword, // if, else, function, while, TRUE, FALSE, NA, NULL
+    keyword, // if, else, function, while, for, in, TRUE, FALSE, NA, NULL
     invalid, // lexer error / unknown token
     
     // Operators
