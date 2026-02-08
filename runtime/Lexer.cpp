@@ -1,7 +1,44 @@
 #include "Lexer.hpp"
 #include <cctype>
-#include <cstdlib>
-#include <cerrno>
+
+// Simple decimal parser for tokens the lexer accepts (digits and at most one '.').
+// Supports optional leading sign, no exponent notation.
+static bool ParseSimpleDecimal(const MiniString& text, double& out) {
+    if (text.empty()) return false;
+    size_t i = 0;
+    bool neg = false;
+    if (text[0] == '+' || text[0] == '-') {
+        neg = (text[0] == '-');
+        i = 1;
+    }
+    bool seen_dot = false;
+    bool seen_digit = false;
+    long long int_part = 0;
+    double frac_part = 0.0;
+    double frac_scale = 1.0;
+
+    for (; i < text.size(); ++i) {
+        unsigned char ch = static_cast<unsigned char>(text[i]);
+        if (ch == '.') {
+            if (seen_dot) return false;
+            seen_dot = true;
+            continue;
+        }
+        if (!std::isdigit(ch)) return false;
+        seen_digit = true;
+        int digit = ch - '0';
+        if (!seen_dot) {
+            int_part = int_part * 10 + digit;
+        } else {
+            frac_scale *= 0.1;
+            frac_part += digit * frac_scale;
+        }
+    }
+    if (!seen_digit) return false;
+    double val = static_cast<double>(int_part) + frac_part;
+    out = neg ? -val : val;
+    return true;
+}
 
 Lexer::Lexer(const MiniString& src) : src(src) {
     // MiniString is null-terminated, but we track logical length.
@@ -72,10 +109,8 @@ Token Lexer::ScanToken() {
             }
             t.type = TokenType::number;
             t.text = text;
-            errno = 0;
-            char* endp = nullptr;
-            double val = std::strtod(text.c_str(), &endp);
-            if (endp == text.c_str() || errno == ERANGE) {
+            double val = 0.0;
+            if (!ParseSimpleDecimal(text, val)) {
                 t.type = TokenType::invalid;
             } else {
                 t.num_val = val;
@@ -112,10 +147,8 @@ Token Lexer::ScanToken() {
         }
         t.type = TokenType::number;
         t.text = text;
-        errno = 0;
-        char* endp = nullptr;
-        double val = std::strtod(text.c_str(), &endp);
-        if (endp == text.c_str() || errno == ERANGE) {
+        double val = 0.0;
+        if (!ParseSimpleDecimal(text, val)) {
             t.type = TokenType::invalid;
         } else {
             t.num_val = val;
