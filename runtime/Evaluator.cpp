@@ -2,7 +2,6 @@
 #include <cstdio>
 #include <cmath>
 #include <algorithm>
-#include <random>
 #include <set>
 #include <cstdint>
 #include <cstring>
@@ -841,10 +840,64 @@ namespace Evaluator {
     // --- LOGIC OPS ---
 
     // --- RANDOMNESS ---
-    static std::mt19937 g_rng(1234);
+    // Tiny custom PRNG suitable for embedded / SH4 targets.
+    // Xorshift32 with a non-zero 32-bit state, plus helpers for uniform and normal draws.
+    static uint32_t g_rng_state = 1234u;
+    static bool g_rng_has_spare = false;
+    static double g_rng_spare = 0.0;
+
+    static void TinyRngSeed(uint32_t seed) {
+        if (seed == 0) seed = 1u; // avoid zero state
+        g_rng_state = seed;
+        g_rng_has_spare = false;
+    }
+
+    static uint32_t TinyRngNextU32() {
+        // xorshift32
+        uint32_t x = g_rng_state;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        g_rng_state = x;
+        return x;
+    }
+
+    static double TinyRngUniform01() {
+        // 53-bit resolution uniform in [0,1)
+        uint64_t a = TinyRngNextU32() >> 5;
+        uint64_t b = TinyRngNextU32() >> 6;
+        uint64_t v = (a << 27) ^ b;
+        return (double)v / (double)(1ULL << 53);
+    }
+
+    static int TinyRngInt(int max_exclusive) {
+        if (max_exclusive <= 0) return 0;
+        // Simple modulo reduction; good enough for this MiniR use.
+        uint32_t r = TinyRngNextU32();
+        return (int)(r % (uint32_t)max_exclusive);
+    }
+
+    static double TinyRngNormal() {
+        // Box-Muller, cached pair
+        if (g_rng_has_spare) {
+            g_rng_has_spare = false;
+            return g_rng_spare;
+        }
+        double u1 = 0.0;
+        do {
+            u1 = TinyRngUniform01();
+        } while (u1 <= 0.0);
+        double u2 = TinyRngUniform01();
+        double mag = std::sqrt(-2.0 * std::log(u1));
+        double z0 = mag * std::cos(2.0 * 3.14159265358979323846 * u2);
+        double z1 = mag * std::sin(2.0 * 3.14159265358979323846 * u2);
+        g_rng_spare = z1;
+        g_rng_has_spare = true;
+        return z0;
+    }
     
     RValuePtr Builtin_SetSeed(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
-        if (!args.empty()) g_rng.seed(args[0]->GetInt(0));
+        if (!args.empty()) TinyRngSeed((uint32_t)args[0]->GetInt(0));
         return RR_Nil();
     }
     
@@ -853,10 +906,12 @@ namespace Evaluator {
         double min = 0, max = 1;
         if (args.size() > 1) min = args[1]->GetDouble(0);
         if (args.size() > 2) max = args[2]->GetDouble(0);
-        
-        std::uniform_real_distribution<double> dist(min, max);
+
         auto res = std::make_shared<RValue>(RType::DOUBLE);
-        for(int i=0; i<n; ++i) res->d_vec.push_back(dist(g_rng));
+        for(int i=0; i<n; ++i) {
+            double u = TinyRngUniform01(); // [0,1)
+            res->d_vec.push_back(min + (max - min) * u);
+        }
         return res;
     }
     
@@ -865,10 +920,12 @@ namespace Evaluator {
         double mean = 0, sd = 1;
         if (args.size() > 1) mean = args[1]->GetDouble(0);
         if (args.size() > 2) sd = args[2]->GetDouble(0);
-        
-        std::normal_distribution<double> dist(mean, sd);
+
         auto res = std::make_shared<RValue>(RType::DOUBLE);
-        for(int i=0; i<n; ++i) res->d_vec.push_back(dist(g_rng));
+        for(int i=0; i<n; ++i) {
+            double z = TinyRngNormal(); // N(0,1)
+            res->d_vec.push_back(mean + sd * z);
+        }
         return res;
     }
     
@@ -902,9 +959,8 @@ namespace Evaluator {
          }
          
          if (replace) {
-             std::uniform_int_distribution<int> dist(0, N-1);
              for(int i=0; i<size; ++i) {
-                 int idx = dist(g_rng);
+                 int idx = TinyRngInt(N);
                  if (x->Length() == 1 && x->type == RType::INTEGER && x->GetInt(0) == N) {
                      res->i_vec.push_back(idx + 1);
                  } else {
@@ -916,7 +972,13 @@ namespace Evaluator {
              }
          } else {
              if (size > N) return RR_Error("Cannot take a sample larger than the population when 'replace = FALSE'");
-             std::shuffle(indices.begin(), indices.end(), g_rng);
+             // Fisher-Yates shuffle using TinyRngInt
+             for (int i = N - 1; i > 0; --i) {
+                 int j = TinyRngInt(i + 1);
+                 int tmp = indices[i];
+                 indices[i] = indices[j];
+                 indices[j] = tmp;
+             }
              for(int i=0; i<size; ++i) {
                  int idx = indices[i];
                  if (x->Length() == 1 && x->type == RType::INTEGER && x->GetInt(0) == N) {
