@@ -1,5 +1,5 @@
 #include "Evaluator.hpp"
-#include <iostream>
+#include <cstdio>
 #include <cmath>
 #include <algorithm>
 #include <random>
@@ -98,7 +98,9 @@ namespace Evaluator {
         if (lenA == 0 || lenB == 0) return;
         int N = std::max(lenA, lenB);
         if ((lenA != 0 && N % lenA != 0) || (lenB != 0 && N % lenB != 0)) {
-            std::cerr << "Warning: longer object length is not a multiple of shorter object length in '" << op << "'\n";
+            std::fprintf(stderr,
+                         "Warning: longer object length is not a multiple of shorter object length in '%s'\n",
+                         op);
         }
     }
 
