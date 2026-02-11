@@ -1744,12 +1744,19 @@ namespace Evaluator {
         
         // --- data.frame subsetting ---
         if (x->type == RType::LIST && HasClass(x, "data.frame")) {
-            // df["Height"], df[2]
-            if (args.size() == 2) {
-                RValuePtr col_idx = args[1];
-                MiniVector<int> cols;
-                RValuePtr names_attr = x->attributes.count("names") ? x->attributes["names"] : RR_Nil();
+            // Helpers: determine dimensions
+            int nc = (int)x->l_vec.size();
+            int nr = 0;
+            if (nc > 0 && x->l_vec[0]) nr = x->l_vec[0]->Length();
+            RValuePtr names_attr = x->attributes.count("names") ? x->attributes["names"] : RR_Nil();
+            RValuePtr row_names_attr = x->attributes.count("row.names") ? x->attributes["row.names"] : RR_Nil();
 
+            auto build_col_indices = [&](RValuePtr col_idx, MiniVector<int>& cols) -> RValuePtr {
+                if (!col_idx || col_idx->type == RType::NIL) {
+                    // All columns
+                    for (int j = 0; j < nc; ++j) cols.push_back(j);
+                    return RR_Nil();
+                }
                 if (col_idx->type == RType::CHARACTER && names_attr && names_attr->type == RType::CHARACTER) {
                     for (int k = 0; k < col_idx->Length(); ++k) {
                         const MiniString &key = col_idx->s_vec[k];
@@ -1759,15 +1766,68 @@ namespace Evaluator {
                         }
                         if (!found) return RR_Error("Subscript out of bounds");
                     }
-                } else if (col_idx->type == RType::INTEGER || col_idx->type == RType::DOUBLE) {
+                    return RR_Nil();
+                }
+                if (col_idx->type == RType::INTEGER || col_idx->type == RType::DOUBLE) {
                     for (int k = 0; k < col_idx->Length(); ++k) {
                         int j = col_idx->GetInt(k) - 1;
-                        if (j < 0 || j >= (int)x->l_vec.size()) return RR_Error("Subscript out of bounds");
+                        if (j < 0 || j >= nc) return RR_Error("Subscript out of bounds");
                         cols.push_back(j);
                     }
-                } else {
-                    return RR_Error("Unsupported column index for data.frame");
+                    return RR_Nil();
                 }
+                if (col_idx->type == RType::LOGICAL) {
+                    int L = col_idx->Length();
+                    if (L == 0) return RR_Nil();
+                    for (int j = 0; j < nc; ++j) {
+                        int lv = col_idx->GetInt(j % L);
+                        if (lv == R_LOGICAL_NA) continue; // skip NA indices
+                        if (lv != 0) {
+                            if (j < 0 || j >= nc) return RR_Error("Subscript out of bounds");
+                            cols.push_back(j);
+                        }
+                    }
+                    return RR_Nil();
+                }
+                return RR_Error("Unsupported column index for data.frame");
+            };
+
+            auto build_row_indices = [&](RValuePtr row_idx, MiniVector<int>& rows) -> RValuePtr {
+                if (!row_idx || row_idx->type == RType::NIL) {
+                    // All rows
+                    for (int i = 0; i < nr; ++i) rows.push_back(i);
+                    return RR_Nil();
+                }
+                if (row_idx->type == RType::INTEGER || row_idx->type == RType::DOUBLE) {
+                    for (int k = 0; k < row_idx->Length(); ++k) {
+                        int i = row_idx->GetInt(k) - 1;
+                        if (i < 0 || i >= nr) return RR_Error("Subscript out of bounds");
+                        rows.push_back(i);
+                    }
+                    return RR_Nil();
+                }
+                if (row_idx->type == RType::LOGICAL) {
+                    int L = row_idx->Length();
+                    if (L == 0) return RR_Nil();
+                    for (int i = 0; i < nr; ++i) {
+                        int lv = row_idx->GetInt(i % L);
+                        if (lv == R_LOGICAL_NA) continue; // skip NA rows
+                        if (lv != 0) {
+                            if (i < 0 || i >= nr) return RR_Error("Subscript out of bounds");
+                            rows.push_back(i);
+                        }
+                    }
+                    return RR_Nil();
+                }
+                return RR_Error("Unsupported row index for data.frame");
+            };
+
+            // df["Height"], df[2]  (column-only subset, all rows)
+            if (args.size() == 2) {
+                RValuePtr col_idx = args[1];
+                MiniVector<int> cols;
+                RValuePtr err = build_col_indices(col_idx, cols);
+                if (err && err->type == RType::ERROR) return err;
 
                 auto res = std::make_shared<RValue>(RType::LIST);
                 for (int j : cols) res->l_vec.push_back(x->l_vec[j]);
@@ -1778,28 +1838,85 @@ namespace Evaluator {
                     for (int j : cols) new_names->s_vec.push_back(names_attr->s_vec[j]);
                     res->attributes["names"] = new_names;
                 }
+                // row.names unchanged (all rows)
                 return res;
             }
 
-            // df[, "Height"] or df[, 2]  (ignore rows for now, full row set)
+            // df[rows, cols]  (rows or cols may be NIL for "all")
             if (args.size() >= 3) {
-                RValuePtr rows = args[1];
-                (void)rows; // full rows for now
-                RValuePtr cols_arg = args[2];
-                int j = -1;
-                RValuePtr names_attr = x->attributes.count("names") ? x->attributes["names"] : RR_Nil();
-                if (cols_arg->type == RType::CHARACTER && cols_arg->Length() > 0 &&
-                    names_attr && names_attr->type == RType::CHARACTER) {
-                    MiniString key = cols_arg->s_vec[0];
-                    for (size_t k = 0; k < x->l_vec.size() && k < (size_t)names_attr->Length(); ++k) {
-                        if (names_attr->s_vec[k] == key) { j = (int)k; break; }
-                    }
-                } else if ((cols_arg->type == RType::INTEGER || cols_arg->type == RType::DOUBLE) && cols_arg->Length() > 0) {
-                    j = cols_arg->GetInt(0) - 1;
+                RValuePtr row_arg = args[1];
+                RValuePtr col_arg = args[2];
+
+                MiniVector<int> row_idx;
+                MiniVector<int> col_idx;
+
+                RValuePtr err = build_row_indices(row_arg, row_idx);
+                if (err && err->type == RType::ERROR) return err;
+                err = build_col_indices(col_arg, col_idx);
+                if (err && err->type == RType::ERROR) return err;
+
+                // If no explicit column index (e.g., df[rows, ]) treat as all columns
+                if (col_idx.size() == 0 && (!col_arg || col_arg->type == RType::NIL)) {
+                    for (int j = 0; j < nc; ++j) col_idx.push_back(j);
                 }
-                if (j < 0 || j >= (int)x->l_vec.size()) return RR_Error("Subscript out of bounds");
-                // return the column vector directly
-                return x->l_vec[j];
+
+                // Special case: df[, j] with all rows and a single column -> return the column vector directly
+                bool all_rows = false;
+                if (!row_arg || row_arg->type == RType::NIL) {
+                    all_rows = true;
+                } else if (row_idx.size() == (size_t)nr) {
+                    all_rows = true;
+                }
+                if (all_rows && col_idx.size() == 1) {
+                    int j = col_idx[0];
+                    if (j < 0 || j >= nc) return RR_Error("Subscript out of bounds");
+                    return x->l_vec[j];
+                }
+
+                // General case: return a new data.frame with selected rows and columns
+                auto res = std::make_shared<RValue>(RType::LIST);
+                for (int cj = 0; cj < (int)col_idx.size(); ++cj) {
+                    int j = col_idx[cj];
+                    if (j < 0 || j >= nc) return RR_Error("Subscript out of bounds");
+                    RValuePtr col = x->l_vec[j];
+                    if (!col) {
+                        res->l_vec.push_back(RR_Nil());
+                        continue;
+                    }
+                    auto new_col = std::make_shared<RValue>(col->type);
+                    for (int r : row_idx) {
+                        if (r < 0 || r >= col->Length()) return RR_Error("Subscript out of bounds");
+                        if (col->type == RType::DOUBLE) new_col->d_vec.push_back(col->d_vec[r]);
+                        else if (col->type == RType::INTEGER || col->type == RType::LOGICAL) new_col->i_vec.push_back(col->i_vec[r]);
+                        else if (col->type == RType::CHARACTER) new_col->s_vec.push_back(col->s_vec[r]);
+                        else new_col->l_vec.push_back(col->l_vec[r]);
+                    }
+                    res->l_vec.push_back(new_col);
+                }
+
+                // copy and subset attributes
+                res->attributes = x->attributes;
+                if (names_attr && names_attr->type == RType::CHARACTER) {
+                    auto new_names = std::make_shared<RValue>(RType::CHARACTER);
+                    for (int j : col_idx) {
+                        if (j >= 0 && j < (int)names_attr->Length())
+                            new_names->s_vec.push_back(names_attr->s_vec[j]);
+                        else
+                            new_names->s_vec.push_back("");
+                    }
+                    res->attributes["names"] = new_names;
+                }
+                if (row_names_attr && row_names_attr->type == RType::INTEGER) {
+                    auto new_rn = std::make_shared<RValue>(RType::INTEGER);
+                    for (int r : row_idx) {
+                        if (r >= 0 && r < (int)row_names_attr->Length())
+                            new_rn->i_vec.push_back(row_names_attr->i_vec[r]);
+                        else
+                            new_rn->i_vec.push_back(R_INT_NA);
+                    }
+                    res->attributes["row.names"] = new_rn;
+                }
+                return res;
             }
         }
         
