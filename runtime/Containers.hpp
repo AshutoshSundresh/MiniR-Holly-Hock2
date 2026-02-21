@@ -137,7 +137,7 @@ public:
 
     void push_back(const T& v) {
         if (_size == _capacity) {
-            reserve(_capacity == 0 ? 4 : _capacity * 2);
+            reserve(_capacity == 0 ? 16 : _capacity * 2);
         }
         new(&_data[_size]) T(v);
         ++_size;
@@ -145,7 +145,7 @@ public:
 
     void push_back(T&& v) {
         if (_size == _capacity) {
-            reserve(_capacity == 0 ? 4 : _capacity * 2);
+            reserve(_capacity == 0 ? 16 : _capacity * 2);
         }
         new(&_data[_size]) T(std::move(v));
         ++_size;
@@ -173,10 +173,11 @@ public:
     // Simple erase range [first, last) used with algorithms like std::unique/remove_if.
     T* erase(T* first, T* last) {
         if (first == last) return first;
-        while (first != last) {
-            last = erase(first);
-        }
-        return first;
+        size_t start_idx = static_cast<size_t>(first - _data);
+        size_t count = static_cast<size_t>(last - first);
+        for (size_t i = 0; i < count; ++i)
+            erase(_data + start_idx);  // always erase same position
+        return _data + start_idx;
     }
 
     template<typename InputIt>
