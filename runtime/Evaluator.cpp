@@ -202,9 +202,11 @@ namespace Evaluator {
             if (res->attributes.count("dim") && index_vals.size() >= 2) {
                 int nr = res->attributes["dim"]->GetInt(0);
                 int nc = res->attributes["dim"]->GetInt(1);
-                int r = index_vals[0]->GetInt(0) - 1;
-                int c = index_vals[1]->GetInt(0) - 1;
-                if (r >= 0 && r < nr && c >= 0 && c < nc) {
+                int r_raw = index_vals[0]->GetInt(0);
+                int c_raw = index_vals[1]->GetInt(0);
+                if (r_raw >= 1 && r_raw <= nr && c_raw >= 1 && c_raw <= nc) {
+                    int r = r_raw - 1;
+                    int c = c_raw - 1;
                     int flat = c * nr + r;
                     res->d_vec[flat] = value->Length() ? value->GetDouble(0) : NAReal();
                 }
