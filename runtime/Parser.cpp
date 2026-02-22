@@ -250,12 +250,9 @@ RValuePtr Parser::ParsePrimary() {
             Consume(TokenType::rparen, "Expect ')'");
             RValuePtr then_branch = ParseExpression();
             RValuePtr else_branch = nullptr;
-            if (Match(TokenType::keyword)) { // Basic check for else? Tokenizer needs to handle else
-                 if (tokens[pos-1].text == "else") {
-                     else_branch = ParseExpression();
-                 } else {
-                     pos--; // Backtrack if not else
-                 }
+            if (Check(TokenType::keyword) && tokens[pos].text == "else") {
+                Advance();
+                else_branch = ParseExpression();
             }
             // Construct IF call: `if`(cond, then, else)
             auto call = std::make_shared<RValue>(RType::LIST);
