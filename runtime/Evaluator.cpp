@@ -1157,11 +1157,12 @@ namespace Evaluator {
         
         auto res = std::make_shared<RValue>(RType::DOUBLE);
         if (d_by == 0) { res->d_vec.push_back(d_from); return res; }
-        
+
+        double eps = (std::abs(d_to) + std::abs(d_from)) * 1e-10 + 1e-15;
         if (d_by > 0) {
-            for(double d = d_from; d <= d_to + 0.000001; d += d_by) res->d_vec.push_back(d);
+            for(double d = d_from; d <= d_to + eps; d += d_by) res->d_vec.push_back(d);
         } else {
-            for(double d = d_from; d >= d_to - 0.000001; d += d_by) res->d_vec.push_back(d);
+            for(double d = d_from; d >= d_to - eps; d += d_by) res->d_vec.push_back(d);
         }
         return res;
     }
