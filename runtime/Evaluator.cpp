@@ -948,33 +948,40 @@ namespace Evaluator {
         RValuePtr test = args[0];
         RValuePtr yes = args[1];
         RValuePtr no = args[2];
-        
-        int n = test->Length(); // Result length determined by test (usually)
-        // R recycles yes/no to match test
-        
-        // Output type? Try to match yes/no. Priority: Char > Double > Int
-        RType outType = RType::INTEGER;
+
+        int n = test->Length();
+        if (n == 0) return std::make_shared<RValue>(RType::LOGICAL);
+
+        int yes_len = yes->Length();
+        int no_len = no->Length();
+        if (yes_len == 0) return RR_Error("ifelse 'yes' has length zero");
+        if (no_len == 0) return RR_Error("ifelse 'no' has length zero");
+
+        // Output type: character > double > integer > logical
+        RType outType = RType::LOGICAL;
         if (yes->type == RType::CHARACTER || no->type == RType::CHARACTER) outType = RType::CHARACTER;
         else if (yes->type == RType::DOUBLE || no->type == RType::DOUBLE) outType = RType::DOUBLE;
-        
+        else if (yes->type == RType::INTEGER || no->type == RType::INTEGER) outType = RType::INTEGER;
+
         auto res = std::make_shared<RValue>(outType);
-        
-        for(int i=0; i<n; ++i) {
-            // Test
-            bool t = false;
-            if (test->type == RType::LOGICAL || test->type == RType::INTEGER) t = (test->i_vec[i] != 0);
-            else t = (test->GetDouble(i) != 0);
-            
-            // Pick value
-            RValuePtr src = t ? yes : no;
-            int src_idx = i % src->Length();
-            
+
+        for (int i = 0; i < n; ++i) {
+            int lv = AsLogicalAt(test, i);
+            if (lv == R_LOGICAL_NA) {
+                // NA test -> NA in result
+                if (outType == RType::DOUBLE) res->d_vec.push_back(NAReal());
+                else if (outType == RType::CHARACTER) res->s_vec.push_back("NA");
+                else res->i_vec.push_back(R_LOGICAL_NA);
+                continue;
+            }
+            RValuePtr src = lv ? yes : no;
+            int src_len = lv ? yes_len : no_len;
+            int src_idx = i % src_len;
             if (outType == RType::DOUBLE) res->d_vec.push_back(src->GetDouble(src_idx));
-            else if (outType == RType::INTEGER) res->i_vec.push_back(src->GetInt(src_idx)); // Simplified
-                else if (outType == RType::CHARACTER) {
+            else if (outType == RType::CHARACTER) {
                 if (src->type == RType::CHARACTER) res->s_vec.push_back(src->s_vec[src_idx]);
                 else res->s_vec.push_back(MiniToString(src->GetDouble(src_idx)));
-            }
+            } else res->i_vec.push_back(src->GetInt(src_idx));
         }
         return res;
     }
