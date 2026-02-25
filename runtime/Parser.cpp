@@ -220,28 +220,30 @@ RValuePtr Parser::ParsePrimary() {
         }
         if (t.text == "function") {
              Consume(TokenType::lparen, "Expect '(' after function");
-             // Parse Formals (simplified: just list of symbols)
              auto formals = std::make_shared<RValue>(RType::LIST);
+             auto defaults = std::make_shared<RValue>(RType::LIST);
              if (!Check(TokenType::rparen)) {
                  do {
                      Token arg = Consume(TokenType::identifier, "Expect argument name");
                      auto sym = std::make_shared<RValue>(RType::SYMBOL);
                      sym->sym_name = arg.text;
                      formals->l_vec.push_back(sym);
-                     // Default values? todo
                      if (Check(TokenType::assign)) {
                          Advance();
-                         ParseExpression(); // Ignore default value for now in AST or store it?
+                         defaults->l_vec.push_back(ParseExpression());
+                     } else {
+                         defaults->l_vec.push_back(RR_Nil()); // no default
                      }
                  } while (Match(TokenType::comma));
              }
              Consume(TokenType::rparen, "Expect ')' after args");
-             
+
              RValuePtr body = ParseExpression();
-             
+
              auto closure = std::make_shared<RValue>(RType::CLOSURE);
              closure->formals = formals;
              closure->body = body;
+             closure->attributes["defaults"] = defaults;
              return closure;
         }
         if (t.text == "if") {

@@ -640,10 +640,19 @@ namespace Evaluator {
                auto new_env = std::make_shared<RValue>(RType::ENV);
                new_env->parent_env = func->env;
                RValuePtr formals = func->formals;
-               for(size_t i=0; i<formals->l_vec.size(); ++i) {
-                    RValuePtr sym = formals->l_vec[i];
-                    if (i < args.size()) Define(sym->sym_name, args[i], new_env);
-                    else Define(sym->sym_name, RR_Nil(), new_env);
+               RValuePtr defaults_list = func->attributes.count("defaults") ? func->attributes["defaults"] : nullptr;
+               for (size_t i = 0; i < formals->l_vec.size(); ++i) {
+                    MiniString name = formals->l_vec[i]->sym_name;
+                    RValuePtr val = (i < args.size()) ? args[i] : nullptr;
+                    if (!val) {
+                        if (defaults_list && i < defaults_list->l_vec.size()) {
+                            RValuePtr def_expr = defaults_list->l_vec[i];
+                            val = (def_expr && def_expr->type != RType::NIL) ? Eval(def_expr, func->env) : RR_Nil();
+                        } else {
+                            val = RR_Nil();
+                        }
+                    }
+                    Define(name, val, new_env);
                }
                return Eval(func->body, new_env);
           }
@@ -3194,16 +3203,27 @@ namespace Evaluator {
                     // Create new environment
                     auto new_env = std::make_shared<RValue>(RType::ENV);
                     new_env->parent_env = func->env; // Lexical scoping
-                    
-                    // Bind Arguments (named + positional via GetArg)
+
+                    // Bind Arguments (named + positional via GetArg), falling back to defaults
                     RValuePtr formals = func->formals;
+                    RValuePtr defaults_list = func->attributes.count("defaults") ? func->attributes["defaults"] : nullptr;
                     for (size_t i = 0; i < formals->l_vec.size(); ++i) {
-                        RValuePtr sym = formals->l_vec[i];
-                        MiniString name = sym->sym_name;
-                        RValuePtr val = GetArg(args, arg_names, name, (int)i, RR_Nil());
+                        MiniString name = formals->l_vec[i]->sym_name;
+                        RValuePtr val = GetArg(args, arg_names, name, (int)i, nullptr);
+                        if (!val) {
+                            // Use default if available
+                            if (defaults_list && i < defaults_list->l_vec.size()) {
+                                RValuePtr def_expr = defaults_list->l_vec[i];
+                                val = (def_expr && def_expr->type != RType::NIL)
+                                    ? Eval(def_expr, func->env)
+                                    : RR_Nil();
+                            } else {
+                                val = RR_Nil();
+                            }
+                        }
                         Define(name, val, new_env);
                     }
-                    
+
                     // Eval Body
                     return Eval(func->body, new_env);
                 }
