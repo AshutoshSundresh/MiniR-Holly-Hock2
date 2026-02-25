@@ -881,64 +881,51 @@ namespace Evaluator {
         // sample(x, size, replace = FALSE)
         if (args.empty()) return RR_Error("sample() requires at least 1 argument");
         RValuePtr x = args[0];
-        
-        // If x is a single number, sample from 1:x
-         MiniVector<int> indices;
-         int N = x->Length();
-         if (N == 1 && x->type == RType::INTEGER && x->GetInt(0) > 0) {
-             N = x->GetInt(0);
-             for(int i=0; i<N; ++i) indices.push_back(i); // 0..N-1
-             // Logic branch: x isn't used as data, indices are
-         } else {
-             for(int i=0; i<N; ++i) indices.push_back(i);
-         }
-         
-         int size = N;
-         if (args.size() > 1) size = args[1]->GetInt(0);
-         
-         bool replace = false;
-         RValuePtr rep_arg = GetArg(args, names, "replace", -1);
-         if (rep_arg) replace = IsTrue(rep_arg);
-         
-         auto res = std::make_shared<RValue>(x->type);
-         // If x was scalar int treated as 1:x range
-         if (x->Length() == 1 && x->type == RType::INTEGER && x->GetInt(0) == N) {
-             res->type = RType::INTEGER;
-         }
-         
-         if (replace) {
-             for(int i=0; i<size; ++i) {
-                 int idx = TinyRngInt(N);
-                 if (x->Length() == 1 && x->type == RType::INTEGER && x->GetInt(0) == N) {
-                     res->i_vec.push_back(idx + 1);
-                 } else {
-                     // Extract from x
-                     if (x->type == RType::DOUBLE) res->d_vec.push_back(x->d_vec[idx]);
-                     else if (x->type == RType::INTEGER) res->i_vec.push_back(x->i_vec[idx]);
-                     else if (x->type == RType::CHARACTER) res->s_vec.push_back(x->s_vec[idx]);
-                 }
-             }
-         } else {
-             if (size > N) return RR_Error("Cannot take a sample larger than the population when 'replace = FALSE'");
-             // Fisher-Yates shuffle using TinyRngInt
-             for (int i = N - 1; i > 0; --i) {
-                 int j = TinyRngInt(i + 1);
-                 int tmp = indices[i];
-                 indices[i] = indices[j];
-                 indices[j] = tmp;
-             }
-             for(int i=0; i<size; ++i) {
-                 int idx = indices[i];
-                 if (x->Length() == 1 && x->type == RType::INTEGER && x->GetInt(0) == N) {
-                     res->i_vec.push_back(idx + 1);
-                 } else {
-                      if (x->type == RType::DOUBLE) res->d_vec.push_back(x->d_vec[idx]);
-                      else if (x->type == RType::INTEGER) res->i_vec.push_back(x->i_vec[idx]);
-                      else if (x->type == RType::CHARACTER) res->s_vec.push_back(x->s_vec[idx]);
-                 }
-             }
-         }
-         return res;
+
+        // If x is a positive scalar integer/double, treat as sample from 1:x
+        bool x_is_range = (x->Length() == 1 && x->GetDouble(0) >= 1.0);
+        int N = x_is_range ? (int)x->GetDouble(0) : x->Length();
+        if (N < 0) return RR_Error("sample: invalid first argument");
+
+        RValuePtr size_arg = GetArg(args, names, "size", 1, nullptr);
+        int size = size_arg ? size_arg->GetInt(0) : N;
+        if (size < 0) return RR_Error("sample: 'size' must be non-negative");
+
+        RValuePtr rep_arg = GetArg(args, names, "replace", 2, nullptr);
+        bool replace = rep_arg ? IsTrue(rep_arg) : false;
+
+        if (!replace && size > N)
+            return RR_Error("Cannot take a sample larger than the population when 'replace = FALSE'");
+
+        // Build 0-based index pool
+        MiniVector<int> indices;
+        for (int i = 0; i < N; ++i) indices.push_back(i);
+
+        auto res = std::make_shared<RValue>(x_is_range ? RType::INTEGER : x->type);
+
+        if (replace) {
+            for (int i = 0; i < size; ++i) {
+                int idx = TinyRngInt(N);
+                if (x_is_range) res->i_vec.push_back(idx + 1); // 1-based
+                else if (x->type == RType::DOUBLE) res->d_vec.push_back(x->d_vec[idx]);
+                else if (x->type == RType::INTEGER) res->i_vec.push_back(x->i_vec[idx]);
+                else if (x->type == RType::CHARACTER) res->s_vec.push_back(x->s_vec[idx]);
+            }
+        } else {
+            // Fisher-Yates partial shuffle
+            for (int i = N - 1; i > 0 && (N - i) <= size; --i) {
+                int j = TinyRngInt(i + 1);
+                int tmp = indices[i]; indices[i] = indices[j]; indices[j] = tmp;
+            }
+            for (int i = 0; i < size; ++i) {
+                int idx = indices[N - 1 - i];
+                if (x_is_range) res->i_vec.push_back(idx + 1); // 1-based
+                else if (x->type == RType::DOUBLE) res->d_vec.push_back(x->d_vec[idx]);
+                else if (x->type == RType::INTEGER) res->i_vec.push_back(x->i_vec[idx]);
+                else if (x->type == RType::CHARACTER) res->s_vec.push_back(x->s_vec[idx]);
+            }
+        }
+        return res;
     }
     
     // --- LOGIC & SETS ---
