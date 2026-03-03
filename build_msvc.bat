@@ -59,7 +59,10 @@ echo.
 :: Compile with exception handling enabled (/EHsc)
 :: /std:c++17 or later
 :: /I. to include current directory for headers
-cl /EHsc /std:c++17 /O2 /I. cli_main.cpp runtime\Evaluator.cpp runtime\Parser.cpp runtime\Lexer.cpp /Fe:minir.exe
+cl /EHsc /std:c++17 /O2 /I. cli_main.cpp runtime\Evaluator.cpp runtime\Parser.cpp runtime\Lexer.cpp ^
+   runtime\BuiltinMath.cpp runtime\BuiltinLogical.cpp runtime\BuiltinString.cpp ^
+   runtime\BuiltinRandom.cpp runtime\BuiltinVector.cpp runtime\BuiltinSubset.cpp ^
+   runtime\BuiltinSelection.cpp /Fe:minir.exe
 
 if %errorlevel% neq 0 (
     echo.
