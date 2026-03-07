@@ -35,7 +35,7 @@ if exist "%VS2026_PRE%" (
 )
 
 echo.
-echo WARNING: Could not automatically find Visual Studio 2022.
+echo WARNING: Could not automatically find Visual Studio 2026.
 echo Attempting to check for VS 2019...
 
 set "VS2019_COMMUNITY=C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat"
@@ -47,7 +47,7 @@ if exist "%VS2019_COMMUNITY%" (
 :: Fallback advice
 echo.
 echo ERROR: Could not find 'vcvars64.bat'.
-echo Please run this script from the "Developer Command Prompt for VS 2022".
+echo Please run this script from the "Developer Command Prompt for Visual Studio".
 echo.
 exit /b 1
 
@@ -57,9 +57,9 @@ echo Environment set. Building MiniR...
 echo.
 
 :: Compile with exception handling enabled (/EHsc)
-:: /std:c++17 or later
+:: /std:c++20 to match the Makefile
 :: /I. to include current directory for headers
-cl /EHsc /std:c++17 /O2 /I. cli_main.cpp runtime\Evaluator.cpp runtime\Parser.cpp runtime\Lexer.cpp ^
+cl /EHsc /std:c++20 /O2 /I. cli_main.cpp runtime\Evaluator.cpp runtime\Parser.cpp runtime\Lexer.cpp ^
    runtime\BuiltinMath.cpp runtime\BuiltinLogical.cpp runtime\BuiltinString.cpp ^
    runtime\BuiltinRandom.cpp runtime\BuiltinVector.cpp runtime\BuiltinSubset.cpp ^
    runtime\BuiltinSelection.cpp /Fe:minir.exe

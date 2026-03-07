@@ -6,7 +6,7 @@ It implements a REPL that reads R code from standard input, lexes and parses it 
 The project is designed to:
 
 - Model a useful subset of the R language.
-- Be portable and compact enough to target constrained or embedded environments, specifically x-CP400, fx-CP400+E, and the fx-CG500.
+- Be portable and compact enough to target constrained or embedded environments, specifically the fx-CP400, fx-CP400+E, and the fx-CG500.
 - Avoid heavy dependencies on the C++ standard library containers and strings.
 
 ## Utility 
@@ -16,15 +16,15 @@ Right now, MiniR-Holly-Hock2 provides:
 - An interactive **CLI REPL** (`minir` / `minir.exe`) that accepts R-like code.
 - A custom **lexer** and **parser** for a substantial subset of R syntax:
   - Identifiers, numbers, strings.
-  - Keywords such as `if`, `else`, `while`, `function`, `TRUE`, `FALSE`, `NA`, `NULL`, etc.
+  - Keywords such as `if`, `else`, `for`, `in`, `while`, `function`, `TRUE`, `FALSE`, `NA`, `NULL`, etc.
   - Operators like `+`, `-`, `*`, `/`, `^`, `==`, `!=`, `<`, `>`, `<=`, `>=`,
     assignment operators (`<-`, `=`, `<<-`), indexing operators (`[`, `[[`, `$`),
-    and other R-style operators (e.g., `:` and `%*%` if wired in).
+    and other R-style operators (e.g., `:`, `%%`, `%/%`, `%*%`, `%in%`).
 - A tree-walking **evaluator** that supports:
   - R-like primitive types (logical, integer, double, character, etc.).
   - Vectors, lists, matrices, data frames, and attributes (e.g., `names`, `dim`, `class`).
   - Environments, symbol lookup, and lexical scoping.
-  - Control flow (e.g., `if`, `while`).
+  - Control flow (`if`/`else`, `for`, `while`).
   - Function calls, including user-defined closures and many built-in functions.
   - Vectorized arithmetic with R-like recycling rules (where implemented).
 
