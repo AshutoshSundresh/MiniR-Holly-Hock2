@@ -48,6 +48,7 @@ namespace Evaluator {
 
     // --- ApplyFunction / Eval forward declarations ---
     RValuePtr ApplyFunction(RValuePtr func, const MiniVector<RValuePtr>& args, RValuePtr env);
+    RValuePtr CallClosure(RValuePtr func, const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& arg_names);
     RValuePtr Eval(RValuePtr exp, RValuePtr env);
 
     // --- Builtin function forward declarations (defined in Builtin*.cpp) ---

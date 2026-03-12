@@ -63,24 +63,8 @@ namespace Evaluator {
               return func->builtin(args, names, env);
           }
           if (func->type == RType::CLOSURE) {
-               auto new_env = std::make_shared<RValue>(RType::ENV);
-               new_env->parent_env = func->env;
-               RValuePtr formals = func->formals;
-               RValuePtr defaults_list = func->attributes.count("defaults") ? func->attributes["defaults"] : nullptr;
-               for (size_t i = 0; i < formals->l_vec.size(); ++i) {
-                    MiniString name = formals->l_vec[i]->sym_name;
-                    RValuePtr val = (i < args.size()) ? args[i] : nullptr;
-                    if (!val) {
-                        if (defaults_list && i < defaults_list->l_vec.size()) {
-                            RValuePtr def_expr = defaults_list->l_vec[i];
-                            val = (def_expr && def_expr->type != RType::NIL) ? Eval(def_expr, func->env) : RR_Nil();
-                        } else {
-                            val = RR_Nil();
-                        }
-                    }
-                    Define(name, val, new_env);
-               }
-               return Eval(func->body, new_env);
+               MiniVector<MiniString> names; names.resize(args.size());
+               return CallClosure(func, args, names);
           }
           return RR_Error("Not a function");
     }

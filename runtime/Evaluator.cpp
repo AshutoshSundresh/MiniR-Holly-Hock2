@@ -144,6 +144,56 @@ namespace Evaluator {
         return default_val;
     }
 
+    // Call a closure: match args to formals R-style (exact names first, then the remaining
+    // positional args fill unmatched formals left to right), bind them in a fresh frame whose
+    // parent is the closure's defining environment, fill in defaults, and evaluate the body.
+    RValuePtr CallClosure(RValuePtr func, const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& arg_names) {
+        RValuePtr formals = func->formals;
+        size_t nf = formals->l_vec.size();
+        MiniVector<RValuePtr> bound(nf);
+        MiniVector<int> used(args.size());
+
+        for (size_t a = 0; a < args.size(); ++a) {
+            if (a >= arg_names.size() || arg_names[a].empty()) continue;
+            size_t f = 0;
+            while (f < nf && formals->l_vec[f]->sym_name != arg_names[a]) ++f;
+            if (f == nf) return RR_Error("unused argument (" + arg_names[a] + " = ...)");
+            if (bound[f]) return RR_Error("formal argument \"" + arg_names[a] + "\" matched by multiple actual arguments");
+            bound[f] = args[a];
+            used[a] = 1;
+        }
+        size_t f = 0;
+        for (size_t a = 0; a < args.size(); ++a) {
+            if (used[a]) continue;
+            while (f < nf && bound[f]) ++f;
+            if (f == nf) return RR_Error("unused argument");
+            bound[f] = args[a];
+        }
+
+        auto new_env = std::make_shared<RValue>(RType::ENV);
+        new_env->parent_env = func->env;
+
+        // Supplied args first so defaults can refer to them, e.g. function(n, m = n * 2)
+        for (size_t i = 0; i < nf; ++i) {
+            if (bound[i]) Define(formals->l_vec[i]->sym_name, bound[i], new_env);
+        }
+        RValuePtr defaults_list = func->attributes.count("defaults") ? func->attributes["defaults"] : nullptr;
+        for (size_t i = 0; i < nf; ++i) {
+            if (bound[i]) continue;
+            RValuePtr val = RR_Nil();
+            if (defaults_list && i < defaults_list->l_vec.size()) {
+                RValuePtr def_expr = defaults_list->l_vec[i];
+                if (def_expr && def_expr->type != RType::NIL) {
+                    val = Eval(def_expr, new_env);
+                    if (val->type == RType::ERROR) return val;
+                }
+            }
+            Define(formals->l_vec[i]->sym_name, val, new_env);
+        }
+
+        return Eval(func->body, new_env);
+    }
+
     // Clone x (shallow copy of vectors and attributes)
     static RValuePtr CloneForAssign(RValuePtr x) {
         auto r = std::make_shared<RValue>(x->type);
@@ -496,35 +546,20 @@ namespace Evaluator {
                 }
                 
                 if (func->type == RType::CLOSURE) {
-                    // Create new environment
-                    auto new_env = std::make_shared<RValue>(RType::ENV);
-                    new_env->parent_env = func->env; // Lexical scoping
-
-                    // Bind Arguments (named + positional via GetArg), falling back to defaults
-                    RValuePtr formals = func->formals;
-                    RValuePtr defaults_list = func->attributes.count("defaults") ? func->attributes["defaults"] : nullptr;
-                    for (size_t i = 0; i < formals->l_vec.size(); ++i) {
-                        MiniString name = formals->l_vec[i]->sym_name;
-                        RValuePtr val = GetArg(args, arg_names, name, (int)i, nullptr);
-                        if (!val) {
-                            // Use default if available
-                            if (defaults_list && i < defaults_list->l_vec.size()) {
-                                RValuePtr def_expr = defaults_list->l_vec[i];
-                                val = (def_expr && def_expr->type != RType::NIL)
-                                    ? Eval(def_expr, func->env)
-                                    : RR_Nil();
-                            } else {
-                                val = RR_Nil();
-                            }
-                        }
-                        Define(name, val, new_env);
-                    }
-
-                    // Eval Body
-                    return Eval(func->body, new_env);
+                    return CallClosure(func, args, arg_names);
                 }
-                
+
                 return RR_Error("Not a function");
+            }
+            case RType::CLOSURE: {
+                // A parsed `function(...)` expression evaluates to a new closure that
+                // captures the environment it was created in (lexical scoping).
+                auto clo = std::make_shared<RValue>(RType::CLOSURE);
+                clo->formals = exp->formals;
+                clo->body = exp->body;
+                clo->attributes = exp->attributes;
+                clo->env = env;
+                return clo;
             }
             default:
                 return exp;
