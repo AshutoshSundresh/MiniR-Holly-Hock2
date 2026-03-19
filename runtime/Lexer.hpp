@@ -24,7 +24,8 @@ enum class TokenType {
     lbrace, rbrace, // { }
     lbracket, rbracket, // [ ]
     dbl_lbracket, dbl_rbracket, // [[ ]]
-    comma, semicolon // , ;
+    comma, semicolon, // , ;
+    newline // statement separator (not emitted inside ( ) or [ ])
 };
 
 struct Token {
@@ -32,6 +33,7 @@ struct Token {
     MiniString text;
     double num_val = 0.0;
     int line = 0;
+    bool is_int = false; // number literal with an L suffix, e.g. 5L
 };
 
 class Lexer {
@@ -44,11 +46,14 @@ private:
     int pos = 0;
     int len = 0;
     int line = 1;
-    
+    MiniVector<char> nesting; // currently open ( [ { brackets, innermost last
+
     char Current() const;
     char Peek(int offset = 1) const;
     void Advance(int n = 1);
     
     Token ScanToken();
+    Token ScanNumber();
+    bool NewlineIsSeparator() const;
     void SkipWhitespace();
 };

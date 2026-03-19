@@ -46,18 +46,29 @@ Token Parser::Consume(TokenType t, const MiniString& msg) {
         Advance();
         return tok;
     }
-    error_state = true;
-    error_msg = msg;
-    error_msg += " at line ";
-    char buf[16];
-    int line_no = Current().line;
-#if defined(_MSC_VER)
-    _snprintf_s(buf, sizeof(buf), _TRUNCATE, "%d", line_no);
-#else
-    std::snprintf(buf, sizeof(buf), "%d", line_no);
-#endif
-    error_msg += buf;
+    Fail(msg);
     return Token{TokenType::eof, "", 0, 0};
+}
+
+void Parser::Fail(const MiniString& msg) {
+    if (error_state) return; // keep the first error
+    error_state = true;
+    incomplete = Check(TokenType::eof);
+    error_msg = msg;
+    if (incomplete) {
+        error_msg += " (unexpected end of input)";
+    } else {
+        error_msg += " at line ";
+        error_msg += MiniToString(Current().line);
+    }
+}
+
+void Parser::SkipNewlines() {
+    while (Check(TokenType::newline)) Advance();
+}
+
+bool Parser::AtStatementEnd() const {
+    return Check(TokenType::newline) || Check(TokenType::semicolon) || Check(TokenType::eof);
 }
 
 int Parser::GetPrecedence(TokenType t) const {
@@ -90,9 +101,20 @@ int Parser::GetPrecedence(TokenType t) const {
     }
 }
 
-RValuePtr Parser::Parse() {
-    if (Check(TokenType::eof)) return RR_Nil();
-    return ParseExpression();
+MiniVector<RValuePtr> Parser::ParseProgram() {
+    MiniVector<RValuePtr> exprs;
+    while (true) {
+        while (Match(TokenType::newline) || Match(TokenType::semicolon));
+        if (Check(TokenType::eof)) break;
+        RValuePtr e = ParseExpression();
+        if (error_state) break;
+        if (!AtStatementEnd()) {
+            Fail("Unexpected '" + Current().text + "'");
+            break;
+        }
+        exprs.push_back(e);
+    }
+    return exprs;
 }
 
 RValuePtr Parser::ParseExpression(int precedence) {
@@ -152,6 +174,7 @@ RValuePtr Parser::ParseExpression(int precedence) {
         } else {
             // Binary Operator. ^ is right-associative in R (2^3^2 = 2^(3^2)), so parse RHS with lower precedence.
             int rhs_prec = (op.type == TokenType::power) ? GetPrecedence(op.type) - 1 : GetPrecedence(op.type);
+            SkipNewlines(); // a trailing operator continues the expression on the next line
             RValuePtr right = ParseExpression(rhs_prec);
             
             auto call = std::make_shared<RValue>(RType::LIST);
@@ -170,11 +193,7 @@ RValuePtr Parser::ParseExpression(int precedence) {
 
 RValuePtr Parser::ParsePrimary() {
     if (Check(TokenType::invalid)) {
-        error_state = true;
-        error_msg = "Invalid token: '";
-        error_msg += Current().text;
-        error_msg += "' at line ";
-        error_msg += MiniToString(Current().line);
+        Fail("Invalid token: '" + Current().text + "'");
         return RR_Nil();
     }
     if (Match(TokenType::bang)) {
@@ -194,6 +213,11 @@ RValuePtr Parser::ParsePrimary() {
     }
     if (Match(TokenType::number)) {
         Token t = tokens[pos-1];
+        if (t.is_int) {
+            auto r = std::make_shared<RValue>(RType::INTEGER);
+            r->i_vec.push_back((int)t.num_val);
+            return r;
+        }
         auto r = std::make_shared<RValue>(RType::DOUBLE);
         r->d_vec.push_back(t.num_val);
         return r;
@@ -237,6 +261,7 @@ RValuePtr Parser::ParsePrimary() {
                  } while (Match(TokenType::comma));
              }
              Consume(TokenType::rparen, "Expect ')' after args");
+             SkipNewlines();
 
              RValuePtr body = ParseExpression();
 
@@ -250,10 +275,15 @@ RValuePtr Parser::ParsePrimary() {
             Consume(TokenType::lparen, "Expect '('");
             RValuePtr cond = ParseExpression();
             Consume(TokenType::rparen, "Expect ')'");
+            SkipNewlines();
             RValuePtr then_branch = ParseExpression();
             RValuePtr else_branch = nullptr;
-            if (Check(TokenType::keyword) && tokens[pos].text == "else") {
-                Advance();
+            // `else` may follow on a later line (as it does inside braces)
+            int look = pos;
+            while (look < (int)tokens.size() && tokens[look].type == TokenType::newline) look++;
+            if (look < (int)tokens.size() && tokens[look].type == TokenType::keyword && tokens[look].text == "else") {
+                pos = look + 1;
+                SkipNewlines();
                 else_branch = ParseExpression();
             }
             // Construct IF call: `if`(cond, then, else)
@@ -269,6 +299,7 @@ RValuePtr Parser::ParsePrimary() {
             Consume(TokenType::lparen, "Expect '(' after while");
             RValuePtr cond = ParseExpression();
             Consume(TokenType::rparen, "Expect ')'");
+            SkipNewlines();
             RValuePtr body = ParseExpression();
             auto call = std::make_shared<RValue>(RType::LIST);
             auto func = std::make_shared<RValue>(RType::SYMBOL); func->sym_name = "while";
@@ -284,13 +315,13 @@ RValuePtr Parser::ParsePrimary() {
 
             // Expect the 'in' keyword
             if (!(Match(TokenType::keyword) && tokens[pos-1].text == "in")) {
-                error_state = true;
-                error_msg = "Expect 'in' in for";
+                Fail("Expect 'in' in for");
                 return RR_Nil();
             }
 
             RValuePtr seq_expr = ParseExpression();
             Consume(TokenType::rparen, "Expect ')'");
+            SkipNewlines();
             RValuePtr body = ParseExpression();
 
             auto var_sym = std::make_shared<RValue>(RType::SYMBOL);
@@ -338,8 +369,8 @@ RValuePtr Parser::ParsePrimary() {
         return ParseBlock();
     }
     
-    error_state = true;
-    error_msg = "Unexpected token: " + Current().text;
+    if (Check(TokenType::newline)) Fail("Unexpected newline");
+    else Fail("Unexpected token: " + Current().text);
     return RR_Nil();
 }
 
@@ -348,10 +379,15 @@ RValuePtr Parser::ParseBlock() {
     auto func = std::make_shared<RValue>(RType::SYMBOL); func->sym_name = "{";
     block_call->l_vec.push_back(func);
     
-    while (!Check(TokenType::rbrace) && !Check(TokenType::eof)) {
+    while (true) {
+        while (Match(TokenType::newline) || Match(TokenType::semicolon));
+        if (Check(TokenType::rbrace) || Check(TokenType::eof)) break;
         block_call->l_vec.push_back(ParseExpression());
-        // Optional semicolons or newlines?
-        while (Match(TokenType::semicolon)); 
+        if (error_state) return block_call;
+        if (!AtStatementEnd() && !Check(TokenType::rbrace)) {
+            Fail("Unexpected '" + Current().text + "'");
+            return block_call;
+        }
     }
     Consume(TokenType::rbrace, "Expect '}'");
     return block_call;

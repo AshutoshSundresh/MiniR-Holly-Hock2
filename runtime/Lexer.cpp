@@ -1,8 +1,8 @@
 #include "Lexer.hpp"
 #include <cctype>
 
-// Simple decimal parser for tokens the lexer accepts (digits and at most one '.').
-// Supports optional leading sign, no exponent notation.
+// Simple decimal parser for tokens the lexer accepts: digits, at most one '.',
+// and an optional exponent (e.g. 1e3, 2.5E-4). Supports optional leading sign.
 static bool ParseSimpleDecimal(const MiniString& text, double& out) {
     if (text.empty()) return false;
     size_t i = 0;
@@ -23,6 +23,24 @@ static bool ParseSimpleDecimal(const MiniString& text, double& out) {
             if (seen_dot) return false;
             seen_dot = true;
             continue;
+        }
+        if ((ch == 'e' || ch == 'E') && seen_digit) {
+            // Exponent: [eE][+-]?digits
+            size_t j = i + 1;
+            bool exp_neg = false;
+            if (j < text.size() && (text[j] == '+' || text[j] == '-')) { exp_neg = (text[j] == '-'); ++j; }
+            if (j >= text.size()) return false;
+            int exponent = 0;
+            for (; j < text.size(); ++j) {
+                if (!std::isdigit(static_cast<unsigned char>(text[j]))) return false;
+                if (exponent < 10000) exponent = exponent * 10 + (text[j] - '0');
+            }
+            double val = static_cast<double>(int_part) + frac_part;
+            double scale = 1.0;
+            for (int k = 0; k < exponent && scale != 0.0 && scale < 1e308; ++k) scale *= 10.0;
+            val = exp_neg ? val / scale : val * scale;
+            out = neg ? -val : val;
+            return true;
         }
         if (!std::isdigit(ch)) return false;
         seen_digit = true;
@@ -59,12 +77,17 @@ void Lexer::Advance(int n) {
     pos += n;
 }
 
+// R ignores newlines inside ( ) and [ ], but inside { } or at top level they end a statement.
+bool Lexer::NewlineIsSeparator() const {
+    return nesting.empty() || nesting.back() == '{';
+}
+
 void Lexer::SkipWhitespace() {
     while (true) {
         char c = Current();
         if (c == ' ' || c == '\t' || c == '\r') {
             Advance();
-        } else if (c == '\n') {
+        } else if (c == '\n' && !NewlineIsSeparator()) {
             line++;
             Advance();
         } else if (c == '#') {
@@ -80,15 +103,57 @@ MiniVector<Token> Lexer::Tokenize() {
     MiniVector<Token> tokens;
     pos = 0;
     line = 1;
-    
+    nesting.clear();
+
     while (pos < len) {
         SkipWhitespace();
         if (pos >= len) break;
+        if (Current() == '\n') {
+            // Separator newline; collapse runs of blank lines into one token
+            if (!tokens.empty() && tokens.back().type != TokenType::newline)
+                tokens.push_back({TokenType::newline, "\\n", 0, line});
+            line++;
+            Advance();
+            continue;
+        }
         tokens.push_back(ScanToken());
     }
     
     tokens.push_back({TokenType::eof, "", 0, line});
     return tokens;
+}
+
+// Number literal: digits with optional '.', optional exponent (1e3, 2.5e-4), optional L suffix.
+Token Lexer::ScanNumber() {
+    Token t;
+    t.line = line;
+    MiniString text;
+    while (isdigit(Current()) || Current() == '.') {
+        text.push_back(Current());
+        Advance();
+    }
+    if ((Current() == 'e' || Current() == 'E') &&
+        (isdigit(Peek()) || ((Peek() == '+' || Peek() == '-') && isdigit(Peek(2))))) {
+        text.push_back(Current());
+        Advance();
+        if (Current() == '+' || Current() == '-') { text.push_back(Current()); Advance(); }
+        while (isdigit(Current())) { text.push_back(Current()); Advance(); }
+    }
+    t.type = TokenType::number;
+    t.text = text;
+    double val = 0.0;
+    if (!ParseSimpleDecimal(text, val)) {
+        t.type = TokenType::invalid;
+        return t;
+    }
+    t.num_val = val;
+    if (Current() == 'L') {
+        Advance();
+        t.text.push_back('L');
+        // 1.5L stays double in R; only whole values in int range become integers
+        if (val < 2147483648.0 && val == (double)(int)val) t.is_int = true;
+    }
+    return t;
 }
 
 Token Lexer::ScanToken() {
@@ -100,23 +165,7 @@ Token Lexer::ScanToken() {
     // Identifier or Keyword
     if (isalpha(c) || c == '.') {
         // R allows leading-dot numbers like `.5`
-        if (c == '.' && isdigit(Peek())) {
-            MiniString text(".");
-            Advance();
-            while (isdigit(Current()) || Current() == '.') {
-                text.push_back(Current());
-                Advance();
-            }
-            t.type = TokenType::number;
-            t.text = text;
-            double val = 0.0;
-            if (!ParseSimpleDecimal(text, val)) {
-                t.type = TokenType::invalid;
-            } else {
-                t.num_val = val;
-            }
-            return t;
-        }
+        if (c == '.' && isdigit(Peek())) return ScanNumber();
 
         MiniString text;
         while (isalnum(Current()) || Current() == '.' || Current() == '_') {
@@ -139,22 +188,7 @@ Token Lexer::ScanToken() {
     }
     
     // Number
-    if (isdigit(c)) {
-        MiniString text;
-        while (isdigit(Current()) || Current() == '.') {
-            text.push_back(Current());
-            Advance();
-        }
-        t.type = TokenType::number;
-        t.text = text;
-        double val = 0.0;
-        if (!ParseSimpleDecimal(text, val)) {
-            t.type = TokenType::invalid;
-        } else {
-            t.num_val = val;
-        }
-        return t;
-    }
+    if (isdigit(c)) return ScanNumber();
     
     // String
     if (c == '"' || c == '\'') {
@@ -182,19 +216,23 @@ Token Lexer::ScanToken() {
         case '*': t.type = TokenType::star; break; 
         case '/': t.type = TokenType::slash; break;
         case '^': t.type = TokenType::power; break;
-        case '(': t.type = TokenType::lparen; break;
-        case ')': t.type = TokenType::rparen; break;
-        case '{': t.type = TokenType::lbrace; break;
-        case '}': t.type = TokenType::rbrace; break;
-        case '[': 
-            if (Current() == '[') { 
-                Advance(); t.type = TokenType::dbl_lbracket; t.text = "[["; 
-            } else t.type = TokenType::lbracket; 
+        case '(': t.type = TokenType::lparen; nesting.push_back('('); break;
+        case ')': t.type = TokenType::rparen; if (!nesting.empty()) nesting.pop_back(); break;
+        case '{': t.type = TokenType::lbrace; nesting.push_back('{'); break;
+        case '}': t.type = TokenType::rbrace; if (!nesting.empty()) nesting.pop_back(); break;
+        case '[':
+            nesting.push_back('[');
+            if (Current() == '[') {
+                Advance(); t.type = TokenType::dbl_lbracket; t.text = "[[";
+                nesting.push_back('[');
+            } else t.type = TokenType::lbracket;
             break;
-        case ']': 
-            if (Current() == ']') { 
-                Advance(); t.type = TokenType::dbl_rbracket; t.text = "]]"; 
-            } else t.type = TokenType::rbracket; 
+        case ']':
+            if (!nesting.empty()) nesting.pop_back();
+            if (Current() == ']') {
+                Advance(); t.type = TokenType::dbl_rbracket; t.text = "]]";
+                if (!nesting.empty()) nesting.pop_back();
+            } else t.type = TokenType::rbracket;
             break;
         case ',': t.type = TokenType::comma; break;
         case ';': t.type = TokenType::semicolon; break;

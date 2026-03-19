@@ -5,15 +5,23 @@
 class Parser {
 public:
     Parser(const MiniVector<Token>& tokens);
-    RValuePtr Parse(); // Parses one expression or a block
+    // Parses every top-level expression (separated by newlines or ';').
+    MiniVector<RValuePtr> ParseProgram();
     bool HasError() const { return error_state; }
+    // True when the error was hitting end of input (e.g. `x <- 1 +`), so more lines may complete it.
+    bool IsIncomplete() const { return error_state && incomplete; }
     MiniString GetError() const { return error_msg; }
 
 private:
     MiniVector<Token> tokens;
     int pos = 0;
     bool error_state = false;
+    bool incomplete = false;
     MiniString error_msg;
+
+    void Fail(const MiniString& msg);
+    void SkipNewlines();
+    bool AtStatementEnd() const;
 
     Token Current() const;
     void Advance();

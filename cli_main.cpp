@@ -65,37 +65,29 @@ int main() {
             Lexer lexer(acc);
             auto tokens = lexer.Tokenize();
             
-            // Parse
+            // Parse every statement on the line(s): `x <- 1; y <- 2` or a multi-line block
             Parser parser(tokens);
-            // Parser::Parse usually returns a single expression or a block.
-            RValuePtr ast = parser.Parse();
-            
-            // Evaluate
-            // The AST might be a list of expressions if the parser supports multiple.
-            // But Parser::Parse usually returns a single expression or a block.
-            // Let's assume it returns one RValuePtr.
-            
+            MiniVector<RValuePtr> exprs = parser.ParseProgram();
+
+            if (parser.IsIncomplete()) {
+                continue; // e.g. `x <- 1 +` -- keep reading lines
+            }
             if (parser.HasError()) {
                 std::cout << "Error: " << parser.GetError().c_str() << std::endl;
                 acc.clear();
                 continue;
             }
 
-            if (ast) {
+            // Evaluate and print each statement; stop at the first error
+            for (auto& ast : exprs) {
                 RValuePtr result = Evaluator::Eval(ast, env);
-                
-                // Print
-                if (result) {
-                     // Check for error
-                     if (result->type == RType::ERROR) {
-                         std::cout << "Error: " << result->sym_name.c_str() << std::endl;
-                     } else {
-                         MiniString s = Evaluator::ToString(result);
-                         // R doesn't print invisible returns usually, but for REPL we print.
-                         // Check if result is NOT NULL or we print [1] ...
-                         if (!s.empty()) std::cout << s.c_str() << std::endl;
-                     }
+                if (!result) continue;
+                if (result->type == RType::ERROR) {
+                    std::cout << "Error: " << result->sym_name.c_str() << std::endl;
+                    break;
                 }
+                MiniString s = Evaluator::ToString(result);
+                if (!s.empty()) std::cout << s.c_str() << std::endl;
             }
             acc.clear();
         } catch (const std::exception& e) {
