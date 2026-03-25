@@ -467,6 +467,7 @@ namespace Evaluator {
                     if (head->sym_name == "if") {
                         // (if cond then else)
                         RValuePtr cond = Eval(exp->l_vec[1], env);
+                        if (cond->type == RType::ERROR) return cond;
                         MiniString cerr;
                         bool c = ConditionToBoolOrError(cond, cerr);
                         if (!cerr.empty()) return RR_Error(cerr);
@@ -481,11 +482,13 @@ namespace Evaluator {
                         RValuePtr last = RR_Nil();
                         while(true) {
                             RValuePtr cond = Eval(cond_expr, env);
+                            if (cond->type == RType::ERROR) return cond;
                             MiniString cerr;
                             bool c = ConditionToBoolOrError(cond, cerr);
                             if (!cerr.empty()) return RR_Error(cerr);
                             if (!c) break;
                             last = Eval(body, env);
+                            if (last->type == RType::ERROR) return last;
                         }
                         return last;
                     }
@@ -498,12 +501,18 @@ namespace Evaluator {
                         RValuePtr last = RR_Nil();
                         int n = seq->Length();
                         for(int i=0; i<n; ++i) {
-                            auto val = std::make_shared<RValue>(seq->type);
-                            if (seq->type == RType::INTEGER || seq->type == RType::LOGICAL) val->i_vec.push_back(seq->i_vec[i]);
-                            else if (seq->type == RType::DOUBLE) val->d_vec.push_back(seq->d_vec[i]);
-                            else if (seq->type == RType::CHARACTER) val->s_vec.push_back(seq->s_vec[i]);
+                            RValuePtr val;
+                            if (seq->type == RType::LIST) {
+                                val = seq->l_vec[i];
+                            } else {
+                                val = std::make_shared<RValue>(seq->type);
+                                if (seq->type == RType::INTEGER || seq->type == RType::LOGICAL) val->i_vec.push_back(seq->i_vec[i]);
+                                else if (seq->type == RType::DOUBLE) val->d_vec.push_back(seq->d_vec[i]);
+                                else if (seq->type == RType::CHARACTER) val->s_vec.push_back(seq->s_vec[i]);
+                            }
                             Define(var_name, val, env);
                             last = Eval(body, env);
+                            if (last->type == RType::ERROR) return last;
                         }
                         return last;
                     }
@@ -511,6 +520,7 @@ namespace Evaluator {
                         RValuePtr res = RR_Nil();
                         for(size_t i=1; i<exp->l_vec.size(); ++i) {
                             res = Eval(exp->l_vec[i], env);
+                            if (res->type == RType::ERROR) return res; // an error aborts the block
                         }
                         return res;
                     }

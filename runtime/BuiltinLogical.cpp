@@ -98,6 +98,7 @@ namespace Evaluator {
              MiniVector<RValuePtr> fargs = { elem };
              // Additional args?
              RValuePtr val = ApplyFunction(FUN, fargs, env);
+             if (val->type == RType::ERROR) return val;
              res->l_vec.push_back(val);
         }
         return res;
