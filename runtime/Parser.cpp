@@ -1,18 +1,20 @@
 #include "Parser.hpp"
 
-// Precedence levels
+// Precedence levels, lowest to highest (matches R's ?Syntax)
 enum Precedence {
     PREC_NONE = 0,
-    PREC_ASSIGNMENT, // <- =
+    PREC_ASSIGNMENT, // <- =   (right-associative)
     PREC_OR,         // |
     PREC_AND,        // &
-    PREC_EQUALITY,   // == !=
-    PREC_COMPARISON, // < > <= >=
+    PREC_NOT,        // unary !
+    PREC_COMPARISON, // == != < > <= >=
     PREC_TERM,       // + -
-    PREC_FACTOR,     // * / %
-    PREC_EXPONENT,   // ^
+    PREC_FACTOR,     // * /
+    PREC_SPECIAL,    // %% %/% %*% %in% %any%
     PREC_COLON,      // :
-    PREC_CALL,       // ( [ $
+    PREC_UNARY,      // unary + -
+    PREC_EXPONENT,   // ^      (right-associative)
+    PREC_CALL,       // ( [ [[ $
 };
 
 Parser::Parser(const MiniVector<Token>& tokens) : tokens(tokens) {
@@ -77,19 +79,19 @@ int Parser::GetPrecedence(TokenType t) const {
         case TokenType::lt: 
         case TokenType::le:
         case TokenType::gt:
-        case TokenType::ge: return PREC_COMPARISON; // R: < > <= >=
+        case TokenType::ge:
         case TokenType::eq:
-        case TokenType::ne: return PREC_EQUALITY;
+        case TokenType::ne: return PREC_COMPARISON;
         case TokenType::pipe: return PREC_OR;
         case TokenType::amp: return PREC_AND;
         case TokenType::plus:
         case TokenType::minus: return PREC_TERM;
         case TokenType::star:
-        case TokenType::slash:
+        case TokenType::slash: return PREC_FACTOR;
         case TokenType::mod:
         case TokenType::div_int:
         case TokenType::mat_mult:
-        case TokenType::infix: return PREC_FACTOR;
+        case TokenType::infix: return PREC_SPECIAL;
         case TokenType::power: return PREC_EXPONENT;
         case TokenType::colon: return PREC_COLON;
         case TokenType::lparen: 
@@ -172,8 +174,10 @@ RValuePtr Parser::ParseExpression(int precedence) {
              call->l_vec.push_back(s);
              left = call;
         } else {
-            // Binary Operator. ^ is right-associative in R (2^3^2 = 2^(3^2)), so parse RHS with lower precedence.
-            int rhs_prec = (op.type == TokenType::power) ? GetPrecedence(op.type) - 1 : GetPrecedence(op.type);
+            // Binary Operator. ^ and assignment are right-associative in R (2^3^2 = 2^(3^2),
+            // a <- b <- 1), so parse their RHS one level lower to let the same operator nest.
+            bool right_assoc = (op.type == TokenType::power || op.type == TokenType::assign);
+            int rhs_prec = right_assoc ? GetPrecedence(op.type) - 1 : GetPrecedence(op.type);
             SkipNewlines(); // a trailing operator continues the expression on the next line
             RValuePtr right = ParseExpression(rhs_prec);
             
@@ -197,7 +201,7 @@ RValuePtr Parser::ParsePrimary() {
         return RR_Nil();
     }
     if (Match(TokenType::bang)) {
-        RValuePtr rhs = ParseExpression(PREC_AND);
+        RValuePtr rhs = ParseExpression(PREC_NOT);
         auto call = std::make_shared<RValue>(RType::LIST);
         auto func = std::make_shared<RValue>(RType::SYMBOL);
         func->sym_name = "!";
@@ -339,7 +343,7 @@ RValuePtr Parser::ParsePrimary() {
     
     // Unary + and - (e.g. -2, +1 in c(-2,-1,0,1,2))
     if (Match(TokenType::minus)) {
-        RValuePtr rhs = ParseExpression(PREC_EXPONENT);
+        RValuePtr rhs = ParseExpression(PREC_UNARY);
         if (error_state) return rhs;
         auto call = std::make_shared<RValue>(RType::LIST);
         auto func = std::make_shared<RValue>(RType::SYMBOL);
@@ -349,7 +353,7 @@ RValuePtr Parser::ParsePrimary() {
         return call;
     }
     if (Match(TokenType::plus)) {
-        RValuePtr rhs = ParseExpression(PREC_EXPONENT);
+        RValuePtr rhs = ParseExpression(PREC_UNARY);
         if (error_state) return rhs;
         auto call = std::make_shared<RValue>(RType::LIST);
         auto func = std::make_shared<RValue>(RType::SYMBOL);
