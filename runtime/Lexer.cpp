@@ -241,6 +241,7 @@ Token Lexer::ScanToken() {
         
         case '<': 
             if (Current() == '-') { Advance(); t.type = TokenType::assign; t.text = "<-"; }
+            else if (Current() == '<' && Peek() == '-') { Advance(2); t.type = TokenType::assign; t.text = "<<-"; }
             else if (Current() == '=') { Advance(); t.type = TokenType::le; t.text = "<="; }
             else t.type = TokenType::lt;
             break;

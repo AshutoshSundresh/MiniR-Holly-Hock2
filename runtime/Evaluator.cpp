@@ -194,6 +194,17 @@ namespace Evaluator {
         return Eval(func->body, new_env);
     }
 
+    // Frame that `name <<- value` writes to: the nearest enclosing frame (above env)
+    // that already defines name, otherwise the global environment.
+    static RValuePtr SuperAssignEnv(const MiniString& name, RValuePtr env) {
+        RValuePtr last = env;
+        for (RValuePtr cur = env ? env->parent_env : nullptr; cur; cur = cur->parent_env) {
+            if (cur->frame.count(name)) return cur;
+            last = cur;
+        }
+        return last;
+    }
+
     // Clone x (shallow copy of vectors and attributes)
     static RValuePtr CloneForAssign(RValuePtr x) {
         auto r = std::make_shared<RValue>(x->type);
@@ -422,8 +433,9 @@ namespace Evaluator {
                 
                 // Handle special forms based on symbol name BEFORE eval ?
                 if (head->type == RType::SYMBOL) {
-                    if (head->sym_name == "<-" || head->sym_name == "=") {
+                    if (head->sym_name == "<-" || head->sym_name == "=" || head->sym_name == "<<-") {
                          if (exp->l_vec.size() != 3) return RR_Error("Bad assignment");
+                         bool super_assign = (head->sym_name == "<<-");
                          RValuePtr lhs = exp->l_vec[1];
                          RValuePtr val = Eval(exp->l_vec[2], env);
                         if (val->type == RType::ERROR) return val;
@@ -433,7 +445,7 @@ namespace Evaluator {
                         MiniVector<RValuePtr> index_vals;
                          if (lhs->type == RType::SYMBOL) {
                              target_name = lhs->sym_name;
-                             Define(target_name, val, env);
+                             Define(target_name, val, super_assign ? SuperAssignEnv(target_name, env) : env);
                              return val;
                          }
                          if (lhs->type == RType::LIST && !lhs->l_vec.empty() && lhs->l_vec[0]->type == RType::SYMBOL) {
@@ -443,8 +455,9 @@ namespace Evaluator {
                                  RValuePtr target = lhs->l_vec[1];
                                  if (target->type != RType::SYMBOL) return RR_Error("invalid assignment target");
                                  target_name = target->sym_name;
-                                 x = Lookup(target_name, env);
-                                 if (!x) return RR_Error("object '" + target_name + "' not found");
+                                 RValuePtr target_env = super_assign ? SuperAssignEnv(target_name, env) : env;
+                                 x = Lookup(target_name, target_env);
+                                 if (x->type == RType::ERROR) return x;
                                  for (size_t i = 2; i < lhs->l_vec.size(); ++i) {
                                      if (sub_op == "$" && i == 2 && lhs->l_vec[i]->type == RType::SYMBOL)
                                          index_vals.push_back(lhs->l_vec[i]); // name: use symbol, not evaluated
@@ -458,8 +471,8 @@ namespace Evaluator {
                                  RValuePtr modified = SubAssign(x, sub_op, index_vals, val, err);
                                  if (!err.empty()) return RR_Error(err);
                                  if (!modified) return RR_Error("subassignment failed");
-                                 Define(target_name, modified, env);
-                                 return modified;
+                                 Define(target_name, modified, target_env);
+                                 return val;
                              }
                          }
                          return RR_Error("LHS must be a symbol or subset expression (e.g. x[i], x$name)");
