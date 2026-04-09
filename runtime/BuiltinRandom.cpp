@@ -30,10 +30,10 @@ namespace Evaluator {
     }
 
     static double TinyRngUniform01() {
-        // 53-bit resolution uniform in [0,1)
+        // 53-bit resolution uniform in [0,1): 27 high bits + 26 low bits
         uint64_t a = TinyRngNextU32() >> 5;
         uint64_t b = TinyRngNextU32() >> 6;
-        uint64_t v = (a << 27) ^ b;
+        uint64_t v = (a << 26) | b;
         return (double)v / (double)(1ULL << 53);
     }
 
@@ -64,7 +64,12 @@ namespace Evaluator {
     }
     
     RValuePtr Builtin_SetSeed(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
-        if (!args.empty()) TinyRngSeed((uint32_t)args[0]->GetInt(0));
+        if (!args.empty()) {
+            // Scramble the seed so small seeds (1, 2, 42...) don't start in a low-entropy state
+            uint32_t s = (uint32_t)args[0]->GetInt(0) * 2654435761u;
+            TinyRngSeed(s ^ (s >> 16));
+            for (int i = 0; i < 8; ++i) TinyRngNextU32();
+        }
         return RR_Nil();
     }
     
