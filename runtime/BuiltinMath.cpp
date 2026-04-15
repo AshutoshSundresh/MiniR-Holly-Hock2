@@ -97,6 +97,12 @@ namespace Evaluator {
         return res;
     }
 
+    // Element as an integer for arithmetic: logical NA (-1) becomes NA_integer_, so TRUE + NA is NA.
+    static int IntAt(RValuePtr v, int i) {
+        int x = v->GetInt(i);
+        return (v->type == RType::LOGICAL && x == R_LOGICAL_NA) ? R_INT_NA : x;
+    }
+
     // Shared setup for binary arithmetic: check lengths, warn recycle, decide type.
     struct BinOpInfo { int N, lenA, lenB; bool use_double; };
     static BinOpInfo PrepareBinOp(RValuePtr a, RValuePtr b, const char* op_name) {
@@ -124,7 +130,7 @@ namespace Evaluator {
         res->i_vec.resize(N);
         if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
         for (int i = 0; i < N; ++i) {
-            int a = args[0]->GetInt(i % lenA), b = args[1]->GetInt(i % lenB);
+            int a = IntAt(args[0], i % lenA), b = IntAt(args[1], i % lenB);
             res->i_vec[i] = (a == R_INT_NA || b == R_INT_NA) ? R_INT_NA : IntOpResultOrNA((int64_t)a + b);
         }
         return res;
@@ -166,7 +172,7 @@ namespace Evaluator {
         res->i_vec.resize(N);
         if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
         for (int i = 0; i < N; ++i) {
-            int a = args[0]->GetInt(i % lenA), b = args[1]->GetInt(i % lenB);
+            int a = IntAt(args[0], i % lenA), b = IntAt(args[1], i % lenB);
             res->i_vec[i] = (a == R_INT_NA || b == R_INT_NA) ? R_INT_NA : IntOpResultOrNA((int64_t)a - b);
         }
         return res;
@@ -189,7 +195,7 @@ namespace Evaluator {
         res->i_vec.resize(N);
         if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
         for (int i = 0; i < N; ++i) {
-            int a = args[0]->GetInt(i % lenA), b = args[1]->GetInt(i % lenB);
+            int a = IntAt(args[0], i % lenA), b = IntAt(args[1], i % lenB);
             res->i_vec[i] = (a == R_INT_NA || b == R_INT_NA) ? R_INT_NA : IntOpResultOrNA((int64_t)a * b);
         }
         return res;
@@ -268,7 +274,7 @@ namespace Evaluator {
             res->i_vec.resize(N);
             if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
             for (int i = 0; i < N; ++i) {
-                int a = args[0]->GetInt(i % lenA), b = args[1]->GetInt(i % lenB);
+                int a = IntAt(args[0], i % lenA), b = IntAt(args[1], i % lenB);
                 res->i_vec[i] = (a == R_INT_NA || b == R_INT_NA || b == 0) ? R_INT_NA : a % b;
             }
             return res;
@@ -291,7 +297,7 @@ namespace Evaluator {
             res->i_vec.resize(N);
             if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
             for (int i = 0; i < N; ++i) {
-                int a = args[0]->GetInt(i % lenA), b = args[1]->GetInt(i % lenB);
+                int a = IntAt(args[0], i % lenA), b = IntAt(args[1], i % lenB);
                 res->i_vec[i] = (a == R_INT_NA || b == R_INT_NA || b == 0) ? R_INT_NA : (int)std::floor((double)a / b);
             }
             return res;

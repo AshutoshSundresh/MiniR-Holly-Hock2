@@ -60,10 +60,16 @@ namespace Evaluator {
             for(int k=0; k<table->Length(); ++k) {
                 // Equality check
                 bool eq = false;
-                // Type specific
-                if (x->type == RType::INTEGER && table->type == RType::INTEGER) eq = (x->i_vec[i] == table->i_vec[k]);
-                else if (x->type == RType::DOUBLE) eq = (x->d_vec[i] == table->GetDouble(k));
-                else if (x->type == RType::CHARACTER) eq = (x->s_vec[i] == (table->type==RType::CHARACTER ? table->s_vec[k] : ""));
+                bool x_chr = (x->type == RType::CHARACTER), t_chr = (table->type == RType::CHARACTER);
+                if (x_chr && t_chr) eq = (x->s_vec[i] == table->s_vec[k]);
+                else if (!x_chr && !t_chr) {
+                    // Numeric/logical: NA matches NA and NaN matches NaN, as in R
+                    double a = x->GetDouble(i), b = table->GetDouble(k);
+                    if (std::isnan(a) || std::isnan(b))
+                        eq = std::isnan(a) && std::isnan(b) && IsNAReal(a) == IsNAReal(b);
+                    else
+                        eq = (a == b);
+                }
                 
                 if (eq) { found = k + 1; break; } // 1-based index
             }
@@ -78,7 +84,8 @@ namespace Evaluator {
         if (m->type == RType::ERROR) return m;
         
         auto res = std::make_shared<RValue>(RType::LOGICAL);
-        for(int v : m->i_vec) res->i_vec.push_back(v == R_INT_NA ? R_LOGICAL_NA : (v > 0 ? 1 : 0));
+        // %in% is never NA: no match is simply FALSE
+        for(int v : m->i_vec) res->i_vec.push_back((v != R_INT_NA && v > 0) ? 1 : 0);
         return res;
     }
 

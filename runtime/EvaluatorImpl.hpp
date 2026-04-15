@@ -15,20 +15,6 @@
 
 namespace Evaluator {
 
-    // --- Inline helpers (safe to define in every TU via static inline) ---
-    static inline double NAReal() {
-        const uint64_t bits = 0x7ff00000000007a2ULL;
-        double d;
-        std::memcpy(&d, &bits, sizeof(d));
-        return d;
-    }
-    static inline bool IsNAReal(double d) {
-        if (!std::isnan(d)) return false;
-        uint64_t bits;
-        std::memcpy(&bits, &d, sizeof(bits));
-        return bits == 0x7ff00000000007a2ULL;
-    }
-
     // --- Forward declarations for helpers defined in Evaluator.cpp ---
     bool IsTrue(RValuePtr v);
     bool HasClass(RValuePtr v, const MiniString& cls);

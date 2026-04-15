@@ -4,6 +4,8 @@
 #include <map>
 #include <cmath>
 #include <limits>
+#include <cstdint>
+#include <cstring>
 
 enum class RType {
     NIL,
@@ -28,6 +30,21 @@ using BuiltinFunc = RValuePtr (*)(const MiniVector<RValuePtr>& args, const MiniV
 // NA constants (before RValue so GetDouble/GetInt can use them)
 const int R_INT_NA = -2147483648;
 const int R_LOGICAL_NA = -1;
+
+// NA_real_ is a NaN whose low word is 1954, as in R. Arithmetic may quiet the NaN
+// (setting the high mantissa bit), so only the low word identifies NA vs plain NaN.
+inline double NAReal() {
+    const uint64_t bits = 0x7ff00000000007a2ULL;
+    double d;
+    std::memcpy(&d, &bits, sizeof(d));
+    return d;
+}
+inline bool IsNAReal(double d) {
+    if (!std::isnan(d)) return false;
+    uint64_t bits;
+    std::memcpy(&bits, &d, sizeof(bits));
+    return (uint32_t)(bits & 0xffffffffu) == 1954u;
+}
 
 struct RValue {
     RType type;
@@ -66,11 +83,11 @@ struct RValue {
     }
     
     double GetDouble(int i) const {
-        if (i < 0 || i >= Length()) return std::numeric_limits<double>::quiet_NaN();
+        if (i < 0 || i >= Length()) return NAReal();
         if (type == RType::DOUBLE) return d_vec[i];
         if (type == RType::INTEGER || type == RType::LOGICAL) {
             int v = i_vec[i];
-            if (v == R_INT_NA || v == R_LOGICAL_NA) return std::numeric_limits<double>::quiet_NaN();
+            if (v == R_INT_NA || v == R_LOGICAL_NA) return NAReal();
             return (double)v;
         }
         return 0.0;
