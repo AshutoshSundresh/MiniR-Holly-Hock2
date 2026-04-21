@@ -19,6 +19,7 @@ namespace Evaluator {
     bool IsTrue(RValuePtr v);
     bool HasClass(RValuePtr v, const MiniString& cls);
     int AsLogicalAt(RValuePtr v, int i);
+    MiniString AsStringAt(RValuePtr v, int i); // as.character() of one element; NA -> R_STRING_NA
     bool ConditionToBoolOrError(RValuePtr cond, MiniString& err);
     void WarnRecycle(const char* op, int lenA, int lenB);
     bool AnyDouble(RValuePtr a, RValuePtr b);

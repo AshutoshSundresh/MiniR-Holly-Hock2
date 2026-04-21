@@ -13,8 +13,9 @@ namespace Evaluator {
         RValuePtr x = args[0];
         auto res = std::make_shared<RValue>(RType::INTEGER);
         for(int i=0; i<x->Length(); ++i) {
-            if (x->type == RType::CHARACTER) res->i_vec.push_back(x->s_vec[i].length());
-            else res->i_vec.push_back(0); // Coerce?
+            MiniString s = AsStringAt(x, i);
+            if (x->type == RType::CHARACTER && IsNAString(s)) res->i_vec.push_back(R_INT_NA);
+            else res->i_vec.push_back(IsNAString(s) ? 2 : (int)s.length()); // nchar(NA) is 2
         }
         return res;
     }
@@ -28,9 +29,9 @@ namespace Evaluator {
         
         auto res = std::make_shared<RValue>(RType::CHARACTER);
         for(int i=0; i<x->Length(); ++i) {
-            MiniString s = "";
-            if (x->type == RType::CHARACTER) s = x->s_vec[i];
-            
+            MiniString s = AsStringAt(x, i);
+            if (IsNAString(s)) { res->s_vec.push_back(R_STRING_NA); continue; }
+
             // R uses 1-based indexing
             int s_len = s.length();
             int r_start = std::max(1, start) - 1;
@@ -61,8 +62,8 @@ namespace Evaluator {
                 // Equality check
                 bool eq = false;
                 bool x_chr = (x->type == RType::CHARACTER), t_chr = (table->type == RType::CHARACTER);
-                if (x_chr && t_chr) eq = (x->s_vec[i] == table->s_vec[k]);
-                else if (!x_chr && !t_chr) {
+                if (x_chr || t_chr) eq = (AsStringAt(x, i) == AsStringAt(table, k)); // compare as strings
+                else {
                     // Numeric/logical: NA matches NA and NaN matches NaN, as in R
                     double a = x->GetDouble(i), b = table->GetDouble(k);
                     if (std::isnan(a) || std::isnan(b))

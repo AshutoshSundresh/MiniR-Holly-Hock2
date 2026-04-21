@@ -34,7 +34,7 @@ namespace Evaluator {
             if (lv == R_LOGICAL_NA) {
                 // NA test -> NA in result
                 if (outType == RType::DOUBLE) res->d_vec.push_back(NAReal());
-                else if (outType == RType::CHARACTER) res->s_vec.push_back("NA");
+                else if (outType == RType::CHARACTER) res->s_vec.push_back(R_STRING_NA);
                 else res->i_vec.push_back(R_LOGICAL_NA);
                 continue;
             }
@@ -42,10 +42,7 @@ namespace Evaluator {
             int src_len = lv ? yes_len : no_len;
             int src_idx = i % src_len;
             if (outType == RType::DOUBLE) res->d_vec.push_back(src->GetDouble(src_idx));
-            else if (outType == RType::CHARACTER) {
-                if (src->type == RType::CHARACTER) res->s_vec.push_back(src->s_vec[src_idx]);
-                else res->s_vec.push_back(MiniToString(src->GetDouble(src_idx)));
-            } else res->i_vec.push_back(src->GetInt(src_idx));
+            else if (outType == RType::CHARACTER) res->s_vec.push_back(AsStringAt(src, src_idx));else res->i_vec.push_back(src->GetInt(src_idx));
         }
         return res;
     }
@@ -455,6 +452,12 @@ namespace Evaluator {
     }
 
     // --- STRING OPS ---
+    // One element as paste() renders it: like as.character(), but NA becomes the text "NA"
+    static MiniString PasteElem(RValuePtr v, int idx) {
+        MiniString s = AsStringAt(v, idx);
+        return IsNAString(s) ? MiniString("NA") : s;
+    }
+
     // paste(..., sep=" ", collapse=NULL)
     RValuePtr Builtin_Paste(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         RValuePtr sep_arg = GetArg(args, names, "sep", -1);
@@ -480,11 +483,7 @@ namespace Evaluator {
                 if (k > 0) s += sep;
                 int idx = i % inputs[k]->Length(); // Recycle
                 // Convert to string
-                RValuePtr v = inputs[k];
-                if (v->type == RType::CHARACTER) s += v->s_vec[idx];
-                else if (v->type == RType::DOUBLE) s += MiniToString(v->d_vec[idx]); // format?
-                else if (v->type == RType::INTEGER) s += MiniToString(v->i_vec[idx]);
-                else if (v->type == RType::LOGICAL) s += (v->i_vec[idx] ? "TRUE" : "FALSE");
+                s += PasteElem(inputs[k], idx);
             }
             res->s_vec.push_back(s);
         }
@@ -521,17 +520,8 @@ namespace Evaluator {
         for(int i=0; i<max_len; ++i) {
             MiniString s;
             for(size_t k=0; k<inputs.size(); ++k) {
-                int idx = i % inputs[k]->Length(); 
-                RValuePtr v = inputs[k];
-                if (v->type == RType::CHARACTER) s += v->s_vec[idx];
-                else if (v->type == RType::DOUBLE) {
-                    // strip trailing zeros?
-                    MiniString tmp = MiniToString(v->d_vec[idx]);
-                    s += tmp.substr(0, tmp.find_last_not_of('0')+1); 
-                    if (s.back() == '.') s.pop_back();
-                }
-                else if (v->type == RType::INTEGER) s += MiniToString(v->i_vec[idx]);
-                else if (v->type == RType::LOGICAL) s += (v->i_vec[idx] ? "TRUE" : "FALSE");
+                int idx = i % inputs[k]->Length();
+                s += PasteElem(inputs[k], idx);
             }
             res->s_vec.push_back(s);
         }
@@ -593,10 +583,8 @@ namespace Evaluator {
          RValuePtr x = args[0];
          std::map<MiniString, int> counts;
          for(int i=0; i<x->Length(); ++i) {
-             MiniString s; // Key
-             if (x->type == RType::CHARACTER) s = x->s_vec[i];
-             else if (x->type == RType::INTEGER) s = MiniToString(x->i_vec[i]);
-             else s = MiniToString(x->GetDouble(i));
+             MiniString s = AsStringAt(x, i); // Key
+             if (IsNAString(s)) continue; // table() drops NA by default
              counts[s]++;
          }
          

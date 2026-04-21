@@ -39,12 +39,17 @@ inline double NAReal() {
     std::memcpy(&d, &bits, sizeof(d));
     return d;
 }
+// NA_character_: a sentinel no string literal can produce (it starts with \x01).
+// Use IsNAString() to test for it; it prints as an unquoted NA.
+inline constexpr const char* R_STRING_NA = "\x01" "NA";
+
 inline bool IsNAReal(double d) {
     if (!std::isnan(d)) return false;
     uint64_t bits;
     std::memcpy(&bits, &d, sizeof(bits));
     return (uint32_t)(bits & 0xffffffffu) == 1954u;
 }
+inline bool IsNAString(const MiniString& s) { return s == R_STRING_NA; }
 
 struct RValue {
     RType type;

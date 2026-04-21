@@ -53,8 +53,9 @@ namespace Evaluator {
         }
         if (v->type == RType::CHARACTER) {
             if (i < 0 || i >= (int)v->s_vec.size()) return 0;
+            if (IsNAString(v->s_vec[i])) return R_LOGICAL_NA;
             MiniString s = v->s_vec[i];
-            for (size_t idx = 0; idx < s.size(); ++idx) {
+            for (size_t idx= 0; idx < s.size(); ++idx) {
                 char ch = s[idx];
                 s[idx] = (char)std::toupper((unsigned char)ch);
             }
@@ -66,6 +67,27 @@ namespace Evaluator {
         }
         // For this MiniR subset, treat other types as FALSE.
         return 0;
+    }
+
+    MiniString AsStringAt(RValuePtr v, int i) {
+        if (!v || i < 0 || i >= v->Length()) return R_STRING_NA;
+        switch (v->type) {
+            case RType::CHARACTER: return v->s_vec[i];
+            case RType::DOUBLE: {
+                double d = v->d_vec[i];
+                if (IsNAReal(d)) return R_STRING_NA;
+                if (std::isnan(d)) return "NaN";
+                if (std::isinf(d)) return d > 0 ? "Inf" : "-Inf";
+                return MiniToString(d);
+            }
+            case RType::INTEGER:
+                return v->i_vec[i] == R_INT_NA ? MiniString(R_STRING_NA) : MiniToString(v->i_vec[i]);
+            case RType::LOGICAL:
+                if (v->i_vec[i] == R_LOGICAL_NA) return R_STRING_NA;
+                return v->i_vec[i] ? "TRUE" : "FALSE";
+            default:
+                return R_STRING_NA;
+        }
     }
 
     bool ConditionToBoolOrError(RValuePtr cond, MiniString& err) {
@@ -239,7 +261,7 @@ namespace Evaluator {
             if (res->type == RType::LIST) { res->l_vec[i] = value; return res; }
             if (res->type == RType::DOUBLE) res->d_vec[i] = value->GetDouble(0);
             else if (res->type == RType::INTEGER || res->type == RType::LOGICAL) res->i_vec[i] = value->Length() ? value->GetInt(0) : R_INT_NA;
-            else if (res->type == RType::CHARACTER) res->s_vec[i] = value->Length() ? value->s_vec[0] : "NA";
+            else if (res->type == RType::CHARACTER) res->s_vec[i] = AsStringAt(value, 0);
             return res;
         }
         if (op == "[") {
@@ -269,7 +291,7 @@ namespace Evaluator {
                 int vi = value->Length() ? value->GetInt(k % vlen) : R_INT_NA;
                 if (res->type == RType::DOUBLE) res->d_vec[i] = v;
                 else if (res->type == RType::INTEGER || res->type == RType::LOGICAL) res->i_vec[i] = vi;
-                else if (res->type == RType::CHARACTER) res->s_vec[i] = value->s_vec[k % vlen];
+                else if (res->type == RType::CHARACTER) res->s_vec[i] = AsStringAt(value, k % vlen);
             }
             return res;
         }
@@ -610,6 +632,10 @@ namespace Evaluator {
             if (x == R_LOGICAL_NA) return "NA";
             return x ? "TRUE" : "FALSE";
         };
+        auto fmtStr = [](const MiniString& x) -> MiniString {
+            if (IsNAString(x)) return "NA";
+            return "\"" + x + "\"";
+        };
 
         MiniString s = "";
         
@@ -641,7 +667,7 @@ namespace Evaluator {
                     if (col->type == RType::DOUBLE) s += fmtDouble(col->GetDouble(i));
                     else if (col->type == RType::INTEGER) s += fmtInt(col->GetInt(i));
                     else if (col->type == RType::LOGICAL) s += fmtLgl(col->GetInt(i));
-                    else if (col->type == RType::CHARACTER && i < col->Length()) s += "\"" + col->s_vec[i] + "\"";
+                    else if (col->type == RType::CHARACTER && i < col->Length()) s += fmtStr(col->s_vec[i]);
                     else s += "NA";
                 }
                 s += "\n";
@@ -666,7 +692,7 @@ namespace Evaluator {
                             if (v->type == RType::DOUBLE) s += fmtDouble(v->d_vec[flat]);
                             else if (v->type == RType::INTEGER) s += fmtInt(v->i_vec[flat]);
                             else if (v->type == RType::LOGICAL) s += fmtLgl(v->i_vec[flat]);
-                            else if (v->type == RType::CHARACTER) s += "\"" + v->s_vec[flat] + "\"";
+                            else if (v->type == RType::CHARACTER) s += fmtStr(v->s_vec[flat]);
                         }
                         s += "\n";
                     }
@@ -687,7 +713,7 @@ namespace Evaluator {
                  if (v->type == RType::DOUBLE) s += fmtDouble(v->d_vec[i]);
                  else if (v->type == RType::INTEGER) s += fmtInt(v->i_vec[i]);
                  else if (v->type == RType::LOGICAL) s += fmtLgl(v->i_vec[i]);
-                 else if (v->type == RType::CHARACTER) s += "\"" + v->s_vec[i] + "\"";
+                 else if (v->type == RType::CHARACTER) s += fmtStr(v->s_vec[i]);
              }
              return s;
         }

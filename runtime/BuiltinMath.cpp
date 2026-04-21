@@ -33,32 +33,8 @@ namespace Evaluator {
             for (auto& arg : args) {
                 if (arg->type == RType::CHARACTER) {
                     res->s_vec.insert(res->s_vec.end(), arg->s_vec.begin(), arg->s_vec.end());
-                } else if (arg->type == RType::INTEGER) {
-                    for (int i = 0; i < arg->Length(); ++i)
-                        if (arg->i_vec[i] == R_INT_NA) res->s_vec.push_back("NA");
-                        else {
-                            MiniString tmp = MiniToString(arg->i_vec[i]);
-                            res->s_vec.push_back(tmp);
-                        }
-                } else if (arg->type == RType::LOGICAL) {
-                    for (int i = 0; i < arg->Length(); ++i) {
-                        int v = arg->i_vec[i];
-                        if (v == R_LOGICAL_NA) res->s_vec.push_back("NA");
-                        else if (v) res->s_vec.push_back("TRUE");
-                        else res->s_vec.push_back("FALSE");
-                    }
-                } else if (arg->type == RType::DOUBLE) {
-                    for (int i = 0; i < arg->Length(); ++i) {
-                        double d = arg->d_vec[i];
-                        if (std::isnan(d)) res->s_vec.push_back("NA");
-                        else if (d == std::floor(d) && d >= INT32_MIN && d <= INT32_MAX) {
-                            MiniString tmp = MiniToString(static_cast<int>(d));
-                            res->s_vec.push_back(tmp);
-                        } else {
-                            MiniString tmp = MiniToString(d);
-                            res->s_vec.push_back(tmp);
-                        }
-                    }
+                } else {
+                    for (int i = 0; i < arg->Length(); ++i) res->s_vec.push_back(AsStringAt(arg, i));
                 }
             }
             return res;
@@ -239,12 +215,14 @@ namespace Evaluator {
         if (a->attributes.count("dim")) {
             res->attributes["dim"] = a->attributes["dim"];
         }
-        bool both_char = (a->type == RType::CHARACTER && b->type == RType::CHARACTER);
+        // If either side is character, R compares as strings ("10" == 10 is TRUE)
+        bool any_char = (a->type == RType::CHARACTER || b->type == RType::CHARACTER);
         for (int i = 0; i < N; ++i) {
             int ia = i % lenA, ib = i % lenB;
-            if (both_char) {
-                const MiniString& sa = a->s_vec[ia];
-                const MiniString& sb = b->s_vec[ib];
+            if (any_char) {
+                MiniString sa = AsStringAt(a, ia);
+                MiniString sb = AsStringAt(b, ib);
+                if (IsNAString(sa) || IsNAString(sb)) { res->i_vec.push_back(R_LOGICAL_NA); continue; }
                 int c = sa.compare(sb);
                 bool r = (op == CmpOp::LT && c < 0) || (op == CmpOp::GT && c > 0) || (op == CmpOp::LE && c <= 0) || (op == CmpOp::GE && c >= 0) || (op == CmpOp::EQ && c == 0) || (op == CmpOp::NE && c != 0);
                 res->i_vec.push_back(r ? 1 : 0);

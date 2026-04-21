@@ -406,7 +406,7 @@ namespace Evaluator {
                     if (m == R_LOGICAL_NA) {
                         if (x->type == RType::DOUBLE) res->d_vec.push_back(NAReal());
                         else if (x->type == RType::INTEGER || x->type == RType::LOGICAL) res->i_vec.push_back(x->type == RType::LOGICAL ? R_LOGICAL_NA : R_INT_NA);
-                        else if (x->type == RType::CHARACTER) res->s_vec.push_back("NA");
+                        else if (x->type == RType::CHARACTER) res->s_vec.push_back(R_STRING_NA);
                         else if (x->type == RType::LIST) res->l_vec.push_back(RR_Nil());
                     } else if (m != 0) { // TRUE
                         if (x->type == RType::DOUBLE) res->d_vec.push_back(x->d_vec[i]);
@@ -431,6 +431,8 @@ namespace Evaluator {
                     if (x->type == RType::DOUBLE) res->d_vec.push_back(NAReal());
                     if (x->type == RType::INTEGER) res->i_vec.push_back(R_INT_NA);
                     if (x->type == RType::LOGICAL) res->i_vec.push_back(R_LOGICAL_NA);
+                    if (x->type == RType::CHARACTER) res->s_vec.push_back(R_STRING_NA);
+                    if (x->type == RType::LIST) res->l_vec.push_back(RR_Nil());
                 }
             }
             return res;
@@ -531,24 +533,7 @@ namespace Evaluator {
         if(args.empty()) return RR_Error("as.character() requires at least 1 argument");
         RValuePtr x = args[0];
         auto res = std::make_shared<RValue>(RType::CHARACTER);
-        for(int i=0; i<x->Length(); ++i) {
-             if (x->type == RType::DOUBLE) {
-                 double d = x->d_vec[i];
-                 if (IsNAReal(d)) res->s_vec.push_back("NA");
-                 else if (std::isnan(d)) res->s_vec.push_back("NaN");
-                 else if (std::isinf(d)) res->s_vec.push_back(d > 0 ? "Inf" : "-Inf");
-                else {
-                    res->s_vec.push_back(MiniToString(d));
-                }
-             } else if (x->type == RType::INTEGER) {
-                 if (x->i_vec[i] == R_INT_NA) res->s_vec.push_back("NA");
-                 else res->s_vec.push_back(MiniToString(x->i_vec[i]));
-             } else if (x->type == RType::LOGICAL) {
-                 if (x->i_vec[i] == R_LOGICAL_NA) res->s_vec.push_back("NA");
-                 else res->s_vec.push_back(x->i_vec[i] ? "TRUE" : "FALSE");
-             }
-             else if (x->type == RType::CHARACTER) res->s_vec.push_back(x->s_vec[i]);
-        }
+        for(int i=0; i<x->Length(); ++i) res->s_vec.push_back(AsStringAt(x, i));
         return res;
     }
 
@@ -583,6 +568,8 @@ namespace Evaluator {
                 is_na = (x->i_vec[i] == R_INT_NA);
 } else if (x->type == RType::LOGICAL) {
                 is_na = (x->i_vec[i] == R_LOGICAL_NA);
+            } else if (x->type == RType::CHARACTER) {
+                is_na = IsNAString(x->s_vec[i]);
             }
             res->i_vec.push_back(is_na ? 1 : 0);
         }

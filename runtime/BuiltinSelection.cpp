@@ -305,18 +305,17 @@ namespace Evaluator {
         // Simplified: Strings -> Integers + Levels
         // 1. Collect unique strings
         MiniVector<MiniString> raw;
-        for(int i=0; i<x->Length(); ++i) {
-             if (x->type == RType::CHARACTER) raw.push_back(x->s_vec[i]);
-             else if (x->type == RType::LOGICAL) raw.push_back(x->i_vec[i] == 1 ? "TRUE" : "FALSE");
-             else raw.push_back(MiniToString(x->GetDouble(i)));
-        }
-        
-        MiniVector<MiniString> levels = raw;
+        for(int i=0; i<x->Length(); ++i) raw.push_back(AsStringAt(x, i));
+
+        // NA is not a level; its code is NA
+        MiniVector<MiniString> levels;
+        for (auto& s : raw) if (!IsNAString(s)) levels.push_back(s);
         std::sort(levels.begin(), levels.end());
         levels.erase(std::unique(levels.begin(), levels.end()), levels.end());
-        
+
         auto res = std::make_shared<RValue>(RType::INTEGER);
         for(auto& s : raw) {
+            if (IsNAString(s)) { res->i_vec.push_back(R_INT_NA); continue; }
             auto it = std::lower_bound(levels.begin(), levels.end(), s);
             res->i_vec.push_back((int)(it - levels.begin()) + 1);
         }
@@ -391,22 +390,7 @@ namespace Evaluator {
                 for (int c = 0; c < nc; ++c) {
                     RValuePtr col = x->l_vec[c];
                     for (int r = 0; r < nr; ++r) {
-                        MiniString out = "NA";
-                        if (!col || r >= col->Length()) out = "NA";
-                        else if (col->type == RType::CHARACTER) out = col->s_vec[r];
-                        else if (col->type == RType::INTEGER) out = (col->i_vec[r] == R_INT_NA) ? "NA" : MiniToString(col->i_vec[r]);
-                        else if (col->type == RType::LOGICAL) {
-                            int v = col->i_vec[r];
-                            out = (v == R_LOGICAL_NA) ? "NA" : (v ? "TRUE" : "FALSE");
-                        } else if (col->type == RType::DOUBLE) {
-                            double d = col->d_vec[r];
-                            if (IsNAReal(d)) out = "NA";
-                            else if (std::isnan(d)) out = "NaN";
-                            else {
-                                out = MiniToString(d);
-                            }
-                        }
-                        res->s_vec[c * nr + r] = out; // column-major
+                        res->s_vec[c * nr + r] = AsStringAt(col, r); // column-major; NA when short
                     }
                 }
                 auto dim = std::make_shared<RValue>(RType::INTEGER);
@@ -607,7 +591,7 @@ namespace Evaluator {
             for (int i = 0; i < n; ++i) paired.push_back({x->s_vec[i], i});
             bool na_at_end = (na_last == 1);
             auto cmp = [decreasing, na_at_end](const std::pair<MiniString, int>& a, const std::pair<MiniString, int>& b) {
-                bool a_na = (a.first.empty() || a.first == "NA"), b_na = (b.first.empty() || b.first == "NA");
+                bool a_na = IsNAString(a.first), b_na = IsNAString(b.first);
                 if (a_na && b_na) return false;
                 if (a_na) return !na_at_end;   // a "less than" b only when we want NA first
                 if (b_na) return na_at_end;    // a "less than" b (NA) when we want NA last
@@ -615,7 +599,7 @@ namespace Evaluator {
             };
             std::stable_sort(paired.begin(), paired.end(), cmp);
             for (int i = 0; i < n; ++i) {
-                if (na_last == -1 && (paired[i].first.empty() || paired[i].first == "NA")) continue;
+                if (na_last == -1 && IsNAString(paired[i].first)) continue;
                 res->s_vec.push_back(x->s_vec[paired[i].second]);
             }
             return res;
