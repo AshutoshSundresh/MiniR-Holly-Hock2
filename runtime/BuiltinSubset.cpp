@@ -418,9 +418,37 @@ namespace Evaluator {
                 return res;
             }
             
-            // Integer index: for each index value k, take x[k] (1-based)
+            // Negative indices exclude elements: x[-1], x[-c(1,3)]. Zeros are ignored.
+            bool any_neg = false, any_pos = false;
+            for (int k = 0; k < idx->Length(); ++k) {
+                int raw = idx->GetInt(k);
+                if (raw == R_INT_NA) continue;
+                if (raw < 0) any_neg = true;
+                else if (raw > 0) any_pos = true;
+            }
+            if (any_neg) {
+                if (any_pos) return RR_Error("can't mix positive and negative subscripts");
+                MiniVector<int> drop(x->Length());
+                for (int k = 0; k < idx->Length(); ++k) {
+                    int raw = idx->GetInt(k);
+                    if (raw == R_INT_NA) return RR_Error("can't mix NAs and negative subscripts");
+                    if (raw < 0 && -raw <= x->Length()) drop[-raw - 1] = 1;
+                }
+                for (int i = 0; i < x->Length(); ++i) {
+                    if (drop[i]) continue;
+                    if (x->type == RType::DOUBLE) res->d_vec.push_back(x->d_vec[i]);
+                    if (x->type == RType::INTEGER || x->type == RType::LOGICAL) res->i_vec.push_back(x->i_vec[i]);
+                    if (x->type == RType::CHARACTER) res->s_vec.push_back(x->s_vec[i]);
+                    if (x->type == RType::LIST) res->l_vec.push_back(x->l_vec[i]);
+                }
+                return res;
+            }
+
+            // Integer index: for each index value k, take x[k] (1-based); 0 selects nothing
             for(int k=0; k<idx->Length(); ++k) {
-                int i = idx->GetInt(k) - 1;
+                int raw = idx->GetInt(k);
+                if (raw == 0) continue;
+                int i = (raw == R_INT_NA) ? -1 : raw - 1;
                 if (i >= 0 && i < x->Length()) {
                      if (x->type == RType::DOUBLE) res->d_vec.push_back(x->d_vec[i]);
                      if (x->type == RType::INTEGER) res->i_vec.push_back(x->i_vec[i]);

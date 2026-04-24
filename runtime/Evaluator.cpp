@@ -705,6 +705,15 @@ namespace Evaluator {
             }
         }
         
+        // Empty vectors print their type, as in R
+        if (v->Length() == 0) {
+            if (v->type == RType::DOUBLE) return "numeric(0)";
+            if (v->type == RType::INTEGER) return HasClass(v, "factor") ? "factor(0)" : "integer(0)";
+            if (v->type == RType::LOGICAL) return "logical(0)";
+            if (v->type == RType::CHARACTER) return "character(0)";
+            if (v->type == RType::LIST) return "list()";
+        }
+
         // Vector: prefix [1] and space-separated
         if (v->type == RType::DOUBLE || v->type == RType::INTEGER || v->type == RType::LOGICAL || v->type == RType::CHARACTER) {
              s += "[1] ";
