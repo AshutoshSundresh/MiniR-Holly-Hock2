@@ -253,15 +253,22 @@ namespace Evaluator {
             if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
             for (int i = 0; i < N; ++i) {
                 int a = IntAt(args[0], i % lenA), b = IntAt(args[1], i % lenB);
-                res->i_vec[i] = (a == R_INT_NA || b == R_INT_NA || b == 0) ? R_INT_NA : a % b;
+                if (a == R_INT_NA || b == R_INT_NA || b == 0) { res->i_vec[i] = R_INT_NA; continue; }
+                int r = a % b;
+                if (r != 0 && ((r < 0) != (b < 0))) r += b; // R: result takes the sign of the divisor
+                res->i_vec[i] = r;
             }
             return res;
         }
         auto res = std::make_shared<RValue>(RType::DOUBLE);
         res->d_vec.resize(N);
         if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
-        for (int i = 0; i < N; ++i)
-            res->d_vec[i] = std::fmod(args[0]->GetDouble(i % lenA), args[1]->GetDouble(i % lenB));
+        for (int i = 0; i < N; ++i) {
+            double a = args[0]->GetDouble(i % lenA), b = args[1]->GetDouble(i % lenB);
+            double r = std::fmod(a, b);
+            if (r != 0 && ((r < 0) != (b < 0))) r += b; // -5 %% 3 is 1, as in R
+            res->d_vec[i] = r;
+        }
         return res;
     }
 
@@ -292,9 +299,14 @@ namespace Evaluator {
     RValuePtr Builtin_Log(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
         if(args.empty()) return RR_Error("log() requires at least 1 argument");
         RValuePtr x = args[0];
-        // base? default e
+        RValuePtr base_arg = GetArg(args, names, "base", 1, nullptr); // default base is e
+        double log_base = 1.0;
+        if (base_arg) {
+            if (base_arg->Length() == 0) return RR_Error("invalid argument 'base' of length 0");
+            log_base = std::log(base_arg->GetDouble(0));
+        }
         auto res = std::make_shared<RValue>(RType::DOUBLE);
-        for(int i=0; i<x->Length(); ++i) res->d_vec.push_back(std::log(x->GetDouble(i)));
+        for(int i=0; i<x->Length(); ++i) res->d_vec.push_back(std::log(x->GetDouble(i)) / log_base);
         return res;
     }
     RValuePtr Builtin_Exp(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {

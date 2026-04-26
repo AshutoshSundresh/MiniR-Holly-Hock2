@@ -543,13 +543,17 @@ namespace Evaluator {
             for(int i=0; i<n; ++i) {
                 int idx = i * nr + i;
                 if (x->type == RType::DOUBLE) res->d_vec.push_back(x->d_vec[idx]);
-                // other types...
+                else if (x->type == RType::INTEGER || x->type == RType::LOGICAL) res->i_vec.push_back(x->i_vec[idx]);
+                else if (x->type == RType::CHARACTER) res->s_vec.push_back(x->s_vec[idx]);
             }
             return res;
         } else {
              // Vector or Scalar
-             if (x->Length() == 1 && x->type == RType::INTEGER) { // diag(3) -> 3x3 identity
-                  int n = x->GetInt(0);
+             // diag(3) -> 3x3 identity. Literals like 3 are doubles, so accept any whole number.
+             double dn = x->Length() == 1 ? x->GetDouble(0) : 0.0;
+             if (x->Length() == 1 && (x->type == RType::INTEGER || x->type == RType::DOUBLE) &&
+                 dn >= 0 && dn == std::floor(dn)) {
+                  int n = (int)dn;
                   auto res = std::make_shared<RValue>(RType::DOUBLE);
                   res->d_vec.resize(n*n, 0.0);
                   for(int i=0; i<n; ++i) res->d_vec[i*n + i] = 1.0;
@@ -563,11 +567,9 @@ namespace Evaluator {
                   int n = x->Length();
                   auto res = std::make_shared<RValue>(x->type);
                   // Resize to n*n, init 0
-                  if (x->type == RType::DOUBLE) res->d_vec.resize(n*n, 0.0);
-                  // ...
-                  for(int i=0; i<n; ++i) {
-                      if (x->type == RType::DOUBLE) res->d_vec[i*n + i] = x->d_vec[i];
-                  }
+                  res->type = RType::DOUBLE;
+                  res->d_vec.resize(n*n, 0.0);
+                  for(int i=0; i<n; ++i) res->d_vec[i*n + i] = x->GetDouble(i);
                   auto dim = std::make_shared<RValue>(RType::INTEGER);
                   dim->i_vec = {n, n};
                   res->attributes["dim"] = dim;

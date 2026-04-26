@@ -649,11 +649,12 @@ namespace Evaluator {
             s += "  ";
             for (int j = 0; j < ncol; ++j) {
                 if (j) s += " ";
-                if (names_attr && names_attr->type == RType::CHARACTER && j < names_attr->Length())
+                if (names_attr && names_attr->type == RType::CHARACTER && j < names_attr->Length()) {
                     s += names_attr->s_vec[j];
-                else
+                } else {
                     s += "V";
                     s += MiniToString(j+1);
+                }
             }
             s += "\n";
 
