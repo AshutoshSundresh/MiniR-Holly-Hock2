@@ -366,7 +366,13 @@ RValuePtr Parser::ParsePrimary() {
     if (Match(TokenType::lparen)) {
         RValuePtr expr = ParseExpression();
         Consume(TokenType::rparen, "Expect ')'");
-        return expr;
+        // Keep the parentheses as a `(` call so the evaluator can make the value visible
+        auto call = std::make_shared<RValue>(RType::LIST);
+        auto func = std::make_shared<RValue>(RType::SYMBOL);
+        func->sym_name = "(";
+        call->l_vec.push_back(func);
+        call->l_vec.push_back(expr);
+        return call;
     }
     
     if (Match(TokenType::lbrace)) {

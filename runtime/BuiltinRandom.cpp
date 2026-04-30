@@ -70,6 +70,7 @@ namespace Evaluator {
             TinyRngSeed(s ^ (s >> 16));
             for (int i = 0; i < 8; ++i) TinyRngNextU32();
         }
+        R_Visible = false;
         return RR_Nil();
     }
     

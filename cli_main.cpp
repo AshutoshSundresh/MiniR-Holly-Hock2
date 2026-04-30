@@ -86,6 +86,7 @@ int main() {
                     std::cout << "Error: " << result->sym_name.c_str() << std::endl;
                     break;
                 }
+                if (!Evaluator::R_Visible) continue; // e.g. assignments
                 MiniString s = Evaluator::ToString(result);
                 if (!s.empty()) std::cout << s.c_str() << std::endl;
             }

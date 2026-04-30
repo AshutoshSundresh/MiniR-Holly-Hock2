@@ -15,6 +15,7 @@ namespace Evaluator {
         else return RR_Error("assign() first argument must be a character name");
         RValuePtr val = args[1];
         Define(name_str, val, env);
+        R_Visible = false;
         return val;
     }
     

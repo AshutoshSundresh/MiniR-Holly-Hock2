@@ -435,9 +435,12 @@ namespace Evaluator {
         REG("$", Builtin_Dollar);
     }
 
+    bool R_Visible = true;
+
     RValuePtr Eval(RValuePtr exp, RValuePtr env) {
+        R_Visible = true;
         if (!exp) return RR_Nil();
-        
+
         switch (exp->type) {
             case RType::SYMBOL:
                 return Lookup(exp->sym_name, env);
@@ -468,6 +471,7 @@ namespace Evaluator {
                          if (lhs->type == RType::SYMBOL) {
                              target_name = lhs->sym_name;
                              Define(target_name, val, super_assign ? SuperAssignEnv(target_name, env) : env);
+                             R_Visible = false;
                              return val;
                          }
                          if (lhs->type == RType::LIST && !lhs->l_vec.empty() && lhs->l_vec[0]->type == RType::SYMBOL) {
@@ -494,6 +498,7 @@ namespace Evaluator {
                                  if (!err.empty()) return RR_Error(err);
                                  if (!modified) return RR_Error("subassignment failed");
                                  Define(target_name, modified, target_env);
+                                 R_Visible = false;
                                  return val;
                              }
                          }
@@ -508,6 +513,7 @@ namespace Evaluator {
                         if (!cerr.empty()) return RR_Error(cerr);
                         if (c) return Eval(exp->l_vec[2], env);
                         if (exp->l_vec.size() > 3) return Eval(exp->l_vec[3], env);
+                        R_Visible = false; // if (FALSE) x  is invisible NULL
                         return RR_Nil();
                     }
                     if (head->sym_name == "while") {
@@ -525,7 +531,8 @@ namespace Evaluator {
                             last = Eval(body, env);
                             if (last->type == RType::ERROR) return last;
                         }
-                        return last;
+                        R_Visible = false; // loops return invisible NULL
+                        return RR_Nil();
                     }
                     if (head->sym_name == "for") {
                         RValuePtr seq_expr = exp->l_vec[2];
@@ -549,7 +556,14 @@ namespace Evaluator {
                             last = Eval(body, env);
                             if (last->type == RType::ERROR) return last;
                         }
-                        return last;
+                        R_Visible = false;
+                        return RR_Nil();
+                    }
+                    if (head->sym_name == "(") {
+                        // Parentheses make a value visible: (x <- 5) prints 5
+                        RValuePtr res = Eval(exp->l_vec[1], env);
+                        R_Visible = true;
+                        return res;
                     }
                     if (head->sym_name == "{") {
                         RValuePtr res = RR_Nil();
@@ -586,6 +600,7 @@ namespace Evaluator {
                     }
                 }
                 
+                R_Visible = true; // argument evaluation may have cleared it
                 if (func->type == RType::BUILTIN) {
                     return func->builtin(args, arg_names, env);
                 }

@@ -1,6 +1,7 @@
 #pragma once
 // Internal shared header for Evaluator split files.
 // Provides forward declarations for all helpers used across translation units.
+#include "Evaluator.hpp"
 #include "RValue.hpp"
 #include "Containers.hpp"
 #include <cstdio>
