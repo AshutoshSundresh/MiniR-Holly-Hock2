@@ -559,6 +559,38 @@ namespace Evaluator {
                         R_Visible = false;
                         return RR_Nil();
                     }
+                    if (head->sym_name == "&&" || head->sym_name == "||") {
+                        // Short-circuit scalar logic: the right side is only evaluated if needed
+                        bool is_and = (head->sym_name == "&&");
+                        auto scalar = [&](RValuePtr expr, int& out) -> RValuePtr {
+                            RValuePtr v = Eval(expr, env);
+                            if (v->type == RType::ERROR) return v;
+                            bool ok_type = v->type == RType::LOGICAL || v->type == RType::INTEGER ||
+                                           v->type == RType::DOUBLE || v->type == RType::CHARACTER;
+                            if (!ok_type || v->Length() == 0)
+                                return RR_Error("invalid 'x' type in 'x " + head->sym_name + " y'");
+                            if (v->Length() > 1)
+                                return RR_Error("'length = " + MiniToString(v->Length()) + "' in coercion to 'logical(1)'");
+                            out = AsLogicalAt(v, 0);
+                            return nullptr;
+                        };
+                        auto lgl = [](int x) {
+                            auto r = std::make_shared<RValue>(RType::LOGICAL);
+                            r->i_vec.push_back(x);
+                            return r;
+                        };
+                        int l = 0, r = 0;
+                        if (RValuePtr err = scalar(exp->l_vec[1], l)) return err;
+                        if (is_and && l == 0) return lgl(0);
+                        if (!is_and && l == 1) return lgl(1);
+                        if (RValuePtr err = scalar(exp->l_vec[2], r)) return err;
+                        if (is_and) {
+                            if (r == 0) return lgl(0);
+                            return lgl((l == R_LOGICAL_NA || r == R_LOGICAL_NA) ? R_LOGICAL_NA : 1);
+                        }
+                        if (r == 1) return lgl(1);
+                        return lgl((l == R_LOGICAL_NA || r == R_LOGICAL_NA) ? R_LOGICAL_NA : 0);
+                    }
                     if (head->sym_name == "(") {
                         // Parentheses make a value visible: (x <- 5) prints 5
                         RValuePtr res = Eval(exp->l_vec[1], env);

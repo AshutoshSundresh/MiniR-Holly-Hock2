@@ -257,8 +257,15 @@ Token Lexer::ScanToken() {
              if (Current() == '=') { Advance(); t.type = TokenType::ne; t.text = "!="; }
              else { t.type = TokenType::bang; t.text = "!"; }
              break;
-        case '&': t.type = TokenType::amp; t.text = "&"; break;
-        case '|': t.type = TokenType::pipe; t.text = "|"; break;
+        // && and || share the precedence of & and |; the parser names the call by its text
+        case '&':
+             t.type = TokenType::amp;
+             if (Current() == '&') { Advance(); t.text = "&&"; } else t.text = "&";
+             break;
+        case '|':
+             t.type = TokenType::pipe;
+             if (Current() == '|') { Advance(); t.text = "||"; } else t.text = "|";
+             break;
         case '%':
              // Special operators %...%
              {
