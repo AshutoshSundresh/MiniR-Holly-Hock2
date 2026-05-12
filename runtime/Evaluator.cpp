@@ -664,127 +664,22 @@ namespace Evaluator {
         if (!v) return "NULL";
         if (v->type == RType::NIL) return "NULL";
         if (v->type == RType::ERROR) return "Error: " + v->sym_name;
-        
-        auto fmtDouble = [](double d) -> MiniString {
-            if (IsNAReal(d)) return "NA";
-            if (std::isnan(d)) return "NaN";
-            if (std::isinf(d)) return d > 0 ? "Inf" : "-Inf";
-            return MiniToString(d);
-        };
-        auto fmtInt = [](int x) -> MiniString {
-            if (x == R_INT_NA) return "NA";
-            return MiniToString(x);
-        };
-        auto fmtLgl = [](int x) -> MiniString {
-            if (x == R_LOGICAL_NA) return "NA";
-            return x ? "TRUE" : "FALSE";
-        };
-        auto fmtStr = [](const MiniString& x) -> MiniString {
-            if (IsNAString(x)) return "NA";
-            return "\"" + x + "\"";
-        };
 
-        MiniString s = "";
-        
-        // data.frame: pretty print like a simple 2D table
-        if (v->type == RType::LIST && HasClass(v, "data.frame")) {
-            int ncol = (int)v->l_vec.size();
-            int nrow = ncol > 0 ? v->l_vec[0]->Length() : 0;
-            RValuePtr names_attr = v->attributes.count("names") ? v->attributes["names"] : RR_Nil();
+        // Layouts live in Print.cpp
+        if (v->type == RType::LIST && HasClass(v, "data.frame")) return FormatDataFrame(v);
 
-            // Header
-            s += "  ";
-            for (int j = 0; j < ncol; ++j) {
-                if (j) s += " ";
-                if (names_attr && names_attr->type == RType::CHARACTER && j < names_attr->Length()) {
-                    s += names_attr->s_vec[j];
-                } else {
-                    s += "V";
-                    s += MiniToString(j+1);
-                }
-            }
-            s += "\n";
-
-            // Rows
-            for (int i = 0; i < nrow; ++i) {
-                s += MiniToString(i+1);
-                s += " ";
-                for (int j = 0; j < ncol; ++j) {
-                    if (j) s += " ";
-                    RValuePtr col = v->l_vec[j];
-                    if (col->type == RType::DOUBLE) s += fmtDouble(col->GetDouble(i));
-                    else if (col->type == RType::INTEGER) s += fmtInt(col->GetInt(i));
-                    else if (col->type == RType::LOGICAL) s += fmtLgl(col->GetInt(i));
-                    else if (col->type == RType::CHARACTER && i < col->Length()) s += fmtStr(col->s_vec[i]);
-                    else s += "NA";
-                }
-                s += "\n";
-            }
-            return s;
-        }
-        
-        // Matrix: print as rows x cols when dim is 2D
-        if ((v->type == RType::DOUBLE || v->type == RType::INTEGER || v->type == RType::LOGICAL || v->type == RType::CHARACTER)
-            && v->attributes.count("dim")) {
+        bool atomic = v->type == RType::DOUBLE || v->type == RType::INTEGER ||
+                      v->type == RType::LOGICAL || v->type == RType::CHARACTER;
+        if (atomic && v->attributes.count("dim")) {
             RValuePtr dim = v->attributes["dim"];
             if (dim->Length() >= 2) {
                 int nr = dim->GetInt(0), nc = dim->GetInt(1);
-                if (nr > 0 && nc > 0 && nr * nc == v->Length()) {
-                    for (int r = 0; r < nr; ++r) {
-                        s += "[";
-                        s += MiniToString(r+1);
-                        s += ",] ";
-                        for (int c = 0; c < nc; ++c) {
-                            int flat = c * nr + r;
-                            if (c > 0) s += " ";
-                            if (v->type == RType::DOUBLE) s += fmtDouble(v->d_vec[flat]);
-                            else if (v->type == RType::INTEGER) s += fmtInt(v->i_vec[flat]);
-                            else if (v->type == RType::LOGICAL) s += fmtLgl(v->i_vec[flat]);
-                            else if (v->type == RType::CHARACTER) s += fmtStr(v->s_vec[flat]);
-                        }
-                        s += "\n";
-                    }
-                    // Header row: [,1] [,2] ...
-                    MiniString header = "     ";
-                    for (int c = 0; c < nc; ++c) { if (c) header += " "; header += "[,"; header += MiniToString(c+1); header += "]"; }
-                    s = header + "\n" + s;
-                    return s;
-                }
+                if (nr > 0 && nc > 0 && nr * nc == v->Length()) return FormatMatrix(v, nr, nc);
             }
         }
-        
-        // Empty vectors print their type, as in R
-        if (v->Length() == 0) {
-            if (v->type == RType::DOUBLE) return "numeric(0)";
-            if (v->type == RType::INTEGER) return HasClass(v, "factor") ? "factor(0)" : "integer(0)";
-            if (v->type == RType::LOGICAL) return "logical(0)";
-            if (v->type == RType::CHARACTER) return "character(0)";
-            if (v->type == RType::LIST) return "list()";
-        }
+        if (atomic) return FormatVector(v);
+        if (v->type == RType::LIST) return FormatList(v);
 
-        // Vector: prefix [1] and space-separated
-        if (v->type == RType::DOUBLE || v->type == RType::INTEGER || v->type == RType::LOGICAL || v->type == RType::CHARACTER) {
-             s += "[1] ";
-             for(int i=0; i<v->Length(); ++i) {
-                 if (i > 0) s += " ";
-                 if (v->type == RType::DOUBLE) s += fmtDouble(v->d_vec[i]);
-                 else if (v->type == RType::INTEGER) s += fmtInt(v->i_vec[i]);
-                 else if (v->type == RType::LOGICAL) s += fmtLgl(v->i_vec[i]);
-                 else if (v->type == RType::CHARACTER) s += fmtStr(v->s_vec[i]);
-             }
-             return s;
-        }
-        
-        if (v->type == RType::LIST) {
-            for(int i=0; i<v->Length(); ++i) {
-                s += "[[";
-                s += MiniToString(i+1);
-                s += "]]\n";
-                s += ToString(v->l_vec[i]) + "\n";
-            }
-            return s;
-        }
-        
         if (v->type == RType::CLOSURE) return "<function>";
         if (v->type == RType::BUILTIN) return "<builtin>";
         if (v->type == RType::ENV) return "<environment>";

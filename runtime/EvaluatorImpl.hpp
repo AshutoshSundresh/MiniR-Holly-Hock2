@@ -34,6 +34,13 @@ namespace Evaluator {
                      int target_pos,
                      RValuePtr default_val = nullptr);
 
+    // --- Printing (Print.cpp) ---
+    MiniString FormatVector(RValuePtr v);
+    MiniString FormatMatrix(RValuePtr v, int nr, int nc);
+    MiniString FormatDataFrame(RValuePtr v);
+    MiniString FormatList(RValuePtr v);
+    MiniString FormatNumber(double x); // one number with 7 significant digits, as cat() shows it
+
     // --- ApplyFunction / Eval forward declarations ---
     RValuePtr ApplyFunction(RValuePtr func, const MiniVector<RValuePtr>& args, RValuePtr env);
     RValuePtr CallClosure(RValuePtr func, const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& arg_names);

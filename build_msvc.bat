@@ -62,7 +62,7 @@ echo.
 cl /EHsc /std:c++20 /O2 /I. cli_main.cpp runtime\Evaluator.cpp runtime\Parser.cpp runtime\Lexer.cpp ^
    runtime\BuiltinMath.cpp runtime\BuiltinLogical.cpp runtime\BuiltinString.cpp ^
    runtime\BuiltinRandom.cpp runtime\BuiltinVector.cpp runtime\BuiltinSubset.cpp ^
-   runtime\BuiltinSelection.cpp /Fe:minir.exe
+   runtime\BuiltinSelection.cpp runtime\Print.cpp /Fe:minir.exe
 
 if %errorlevel% neq 0 (
     echo.
