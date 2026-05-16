@@ -19,7 +19,40 @@ namespace Evaluator {
         return val;
     }
     
+    // Names for c(...): each argument's tag combined with its own element names, as in R:
+    // c(a = 1) -> "a", c(a = 1:2) -> "a1" "a2", c(a = c(x = 1)) -> "a.x"
+    static RValuePtr CombineNames(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names) {
+        bool any = false;
+        for (size_t k = 0; k < args.size(); ++k)
+            if ((k < names.size() && !names[k].empty()) || args[k]->attributes.count("names")) any = true;
+        if (!any) return nullptr;
+        auto out = std::make_shared<RValue>(RType::CHARACTER);
+        for (size_t k = 0; k < args.size(); ++k) {
+            RValuePtr a = args[k];
+            MiniString tag = k < names.size() ? names[k] : MiniString("");
+            RValuePtr own = a->attributes.count("names") ? a->attributes["names"] : nullptr;
+            int n = a->Length();
+            for (int i = 0; i < n; ++i) {
+                MiniString inner = (own && i < own->Length()) ? AsStringAt(own, i) : MiniString("");
+                if (tag.empty()) out->s_vec.push_back(inner);
+                else if (!inner.empty()) out->s_vec.push_back(tag + "." + inner);
+                else if (n == 1) out->s_vec.push_back(tag);
+                else out->s_vec.push_back(tag + MiniToString(i + 1));
+            }
+        }
+        return out;
+    }
+
+    static RValuePtr CombineValues(const MiniVector<RValuePtr>& args);
+
     RValuePtr Builtin_C(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
+        RValuePtr res = CombineValues(args);
+        RValuePtr nms = CombineNames(args, names);
+        if (nms && nms->Length() == res->Length()) res->attributes["names"] = nms;
+        return res;
+    }
+
+    static RValuePtr CombineValues(const MiniVector<RValuePtr>& args) {
         // Combine with R-like coercion priority: character > double > integer > logical
         bool has_char = false, has_double = false, has_int = false, has_lgl = false;
         for (auto& arg : args) {
@@ -80,6 +113,15 @@ namespace Evaluator {
         return (v->type == RType::LOGICAL && x == R_LOGICAL_NA) ? R_INT_NA : x;
     }
 
+    // Binary ops keep dim and names from whichever operand has the result's length,
+    // preferring the first, as R does (so 2 * m stays a matrix).
+    static void KeepAttrs(RValuePtr res, RValuePtr a, RValuePtr b, int N) {
+        if (a->attributes.count("dim") && a->Length() == N) res->attributes["dim"] = a->attributes["dim"];
+        else if (b->attributes.count("dim") && b->Length() == N) res->attributes["dim"] = b->attributes["dim"];
+        if (a->attributes.count("names") && a->Length() == N) res->attributes["names"] = a->attributes["names"];
+        else if (b->attributes.count("names") && b->Length() == N) res->attributes["names"] = b->attributes["names"];
+    }
+
     // Shared setup for binary arithmetic: check lengths, warn recycle, decide type.
     struct BinOpInfo { int N, lenA, lenB; bool use_double; };
     static BinOpInfo PrepareBinOp(RValuePtr a, RValuePtr b, const char* op_name) {
@@ -98,14 +140,14 @@ namespace Evaluator {
         if (use_double) {
             auto res = std::make_shared<RValue>(RType::DOUBLE);
             res->d_vec.resize(N);
-            if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
+            KeepAttrs(res, args[0], args[1], N);
             for (int i = 0; i < N; ++i)
                 res->d_vec[i] = args[0]->GetDouble(i % lenA) + args[1]->GetDouble(i % lenB);
             return res;
         }
         auto res = std::make_shared<RValue>(RType::INTEGER);
         res->i_vec.resize(N);
-        if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
+        KeepAttrs(res, args[0], args[1], N);
         for (int i = 0; i < N; ++i) {
             int a = IntAt(args[0], i % lenA), b = IntAt(args[1], i % lenB);
             res->i_vec[i] = (a == R_INT_NA || b == R_INT_NA) ? R_INT_NA : IntOpResultOrNA((int64_t)a + b);
@@ -140,14 +182,14 @@ namespace Evaluator {
         if (use_double) {
             auto res = std::make_shared<RValue>(RType::DOUBLE);
             res->d_vec.resize(N);
-            if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
+            KeepAttrs(res, args[0], args[1], N);
             for (int i = 0; i < N; ++i)
                 res->d_vec[i] = args[0]->GetDouble(i % lenA) - args[1]->GetDouble(i % lenB);
             return res;
         }
         auto res = std::make_shared<RValue>(RType::INTEGER);
         res->i_vec.resize(N);
-        if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
+        KeepAttrs(res, args[0], args[1], N);
         for (int i = 0; i < N; ++i) {
             int a = IntAt(args[0], i % lenA), b = IntAt(args[1], i % lenB);
             res->i_vec[i] = (a == R_INT_NA || b == R_INT_NA) ? R_INT_NA : IntOpResultOrNA((int64_t)a - b);
@@ -163,14 +205,14 @@ namespace Evaluator {
         if (use_double) {
             auto res = std::make_shared<RValue>(RType::DOUBLE);
             res->d_vec.resize(N);
-            if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
+            KeepAttrs(res, args[0], args[1], N);
             for (int i = 0; i < N; ++i)
                 res->d_vec[i] = args[0]->GetDouble(i % lenA) * args[1]->GetDouble(i % lenB);
             return res;
         }
         auto res = std::make_shared<RValue>(RType::INTEGER);
         res->i_vec.resize(N);
-        if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
+        KeepAttrs(res, args[0], args[1], N);
         for (int i = 0; i < N; ++i) {
             int a = IntAt(args[0], i % lenA), b = IntAt(args[1], i % lenB);
             res->i_vec[i] = (a == R_INT_NA || b == R_INT_NA) ? R_INT_NA : IntOpResultOrNA((int64_t)a * b);
@@ -184,7 +226,7 @@ namespace Evaluator {
         if (lenA == 0 || lenB == 0) return std::make_shared<RValue>(RType::DOUBLE);
         auto res = std::make_shared<RValue>(RType::DOUBLE);
         res->d_vec.resize(N);
-        if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
+        KeepAttrs(res, args[0], args[1], N);
         for (int i = 0; i < N; ++i)
             res->d_vec[i] = args[0]->GetDouble(i % lenA) / args[1]->GetDouble(i % lenB);
         return res;
@@ -196,7 +238,7 @@ namespace Evaluator {
         if (lenA == 0 || lenB == 0) return std::make_shared<RValue>(RType::DOUBLE);
         auto res = std::make_shared<RValue>(RType::DOUBLE);
         res->d_vec.resize(N);
-        if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
+        KeepAttrs(res, args[0], args[1], N);
         for (int i = 0; i < N; ++i)
             res->d_vec[i] = std::pow(args[0]->GetDouble(i % lenA), args[1]->GetDouble(i % lenB));
         return res;
@@ -213,9 +255,7 @@ namespace Evaluator {
         int N = std::max(lenA, lenB);
         auto res = std::make_shared<RValue>(RType::LOGICAL);
         // Preserve dim attribute from first argument (if matrix, result is also matrix)
-        if (a->attributes.count("dim")) {
-            res->attributes["dim"] = a->attributes["dim"];
-        }
+        KeepAttrs(res, a, b, N);
         // If either side is character, R compares as strings ("10" == 10 is TRUE)
         bool any_char = (a->type == RType::CHARACTER || b->type == RType::CHARACTER);
         for (int i = 0; i < N; ++i) {
@@ -251,7 +291,7 @@ namespace Evaluator {
         if (!use_double && IsIntLike(args[0]) && IsIntLike(args[1])) {
             auto res = std::make_shared<RValue>(RType::INTEGER);
             res->i_vec.resize(N);
-            if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
+            KeepAttrs(res, args[0], args[1], N);
             for (int i = 0; i < N; ++i) {
                 int a = IntAt(args[0], i % lenA), b = IntAt(args[1], i % lenB);
                 if (a == R_INT_NA || b == R_INT_NA || b == 0) { res->i_vec[i] = R_INT_NA; continue; }
@@ -263,7 +303,7 @@ namespace Evaluator {
         }
         auto res = std::make_shared<RValue>(RType::DOUBLE);
         res->d_vec.resize(N);
-        if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
+        KeepAttrs(res, args[0], args[1], N);
         for (int i = 0; i < N; ++i) {
             double a = args[0]->GetDouble(i % lenA), b = args[1]->GetDouble(i % lenB);
             double r = std::fmod(a, b);
@@ -281,7 +321,7 @@ namespace Evaluator {
         if (!use_double && IsIntLike(args[0]) && IsIntLike(args[1])) {
             auto res = std::make_shared<RValue>(RType::INTEGER);
             res->i_vec.resize(N);
-            if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
+            KeepAttrs(res, args[0], args[1], N);
             for (int i = 0; i < N; ++i) {
                 int a = IntAt(args[0], i % lenA), b = IntAt(args[1], i % lenB);
                 res->i_vec[i] = (a == R_INT_NA || b == R_INT_NA || b == 0) ? R_INT_NA : (int)std::floor((double)a / b);
@@ -290,7 +330,7 @@ namespace Evaluator {
         }
         auto res = std::make_shared<RValue>(RType::DOUBLE);
         res->d_vec.resize(N);
-        if (args[0]->attributes.count("dim")) res->attributes["dim"] = args[0]->attributes["dim"];
+        KeepAttrs(res, args[0], args[1], N);
         for (int i = 0; i < N; ++i)
             res->d_vec[i] = std::floor(args[0]->GetDouble(i % lenA) / args[1]->GetDouble(i % lenB));
         return res;

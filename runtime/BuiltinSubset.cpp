@@ -396,72 +396,78 @@ namespace Evaluator {
             auto res = std::make_shared<RValue>(x->type);
             
             if (idx->type == RType::NIL) return x; // [] -> x
-            
-            // Logical index: select x[i] where idx[i] is TRUE (recycle idx to length of x)
+
+            int xlen = x->Length();
+            RValuePtr x_names = x->attributes.count("names") ? x->attributes["names"] : nullptr;
+
+            // Resolve the index to 0-based source positions; -1 means "NA / no such element"
+            MiniVector<int> sel;
             if (idx->type == RType::LOGICAL) {
-                int xlen = x->Length();
+                // Logical mask, recycled to the length of x
                 int ilen = idx->Length();
-                for (int i = 0; i < xlen; ++i) {
-                    int m = (i < ilen) ? idx->i_vec[i] : idx->i_vec[i % ilen];
-                    if (m == R_LOGICAL_NA) {
-                        if (x->type == RType::DOUBLE) res->d_vec.push_back(NAReal());
-                        else if (x->type == RType::INTEGER || x->type == RType::LOGICAL) res->i_vec.push_back(x->type == RType::LOGICAL ? R_LOGICAL_NA : R_INT_NA);
-                        else if (x->type == RType::CHARACTER) res->s_vec.push_back(R_STRING_NA);
-                        else if (x->type == RType::LIST) res->l_vec.push_back(RR_Nil());
-                    } else if (m != 0) { // TRUE
-                        if (x->type == RType::DOUBLE) res->d_vec.push_back(x->d_vec[i]);
-                        else if (x->type == RType::INTEGER || x->type == RType::LOGICAL) res->i_vec.push_back(x->i_vec[i]);
-                        else if (x->type == RType::CHARACTER) res->s_vec.push_back(x->s_vec[i]);
-                        else if (x->type == RType::LIST) res->l_vec.push_back(x->l_vec[i]);
-                    }
+                for (int i = 0; ilen > 0 && i < xlen; ++i) {
+                    int m = idx->i_vec[i % ilen];
+                    if (m == R_LOGICAL_NA) sel.push_back(-1);
+                    else if (m != 0) sel.push_back(i);
                 }
-                return res;
-            }
-            
-            // Negative indices exclude elements: x[-1], x[-c(1,3)]. Zeros are ignored.
-            bool any_neg = false, any_pos = false;
-            for (int k = 0; k < idx->Length(); ++k) {
-                int raw = idx->GetInt(k);
-                if (raw == R_INT_NA) continue;
-                if (raw < 0) any_neg = true;
-                else if (raw > 0) any_pos = true;
-            }
-            if (any_neg) {
-                if (any_pos) return RR_Error("can't mix positive and negative subscripts");
-                MiniVector<int> drop(x->Length());
+            } else if (idx->type == RType::CHARACTER) {
+                // By name: x["a"]
+                for (int k = 0; k < idx->Length(); ++k) {
+                    int found = -1;
+                    for (int i = 0; x_names && i < xlen && i < x_names->Length(); ++i) {
+                        if (x_names->s_vec[i] == idx->s_vec[k]) { found = i; break; }
+                    }
+                    sel.push_back(found);
+                }
+            } else {
+                // Negative indices exclude elements: x[-1], x[-c(1,3)]. Zeros are ignored.
+                bool any_neg = false, any_pos = false;
                 for (int k = 0; k < idx->Length(); ++k) {
                     int raw = idx->GetInt(k);
-                    if (raw == R_INT_NA) return RR_Error("can't mix NAs and negative subscripts");
-                    if (raw < 0 && -raw <= x->Length()) drop[-raw - 1] = 1;
+                    if (raw == R_INT_NA) continue;
+                    if (raw < 0) any_neg = true;
+                    else if (raw > 0) any_pos = true;
                 }
-                for (int i = 0; i < x->Length(); ++i) {
-                    if (drop[i]) continue;
-                    if (x->type == RType::DOUBLE) res->d_vec.push_back(x->d_vec[i]);
-                    if (x->type == RType::INTEGER || x->type == RType::LOGICAL) res->i_vec.push_back(x->i_vec[i]);
-                    if (x->type == RType::CHARACTER) res->s_vec.push_back(x->s_vec[i]);
-                    if (x->type == RType::LIST) res->l_vec.push_back(x->l_vec[i]);
+                if (any_neg) {
+                    if (any_pos) return RR_Error("can't mix positive and negative subscripts");
+                    MiniVector<int> drop(xlen);
+                    for (int k = 0; k < idx->Length(); ++k) {
+                        int raw = idx->GetInt(k);
+                        if (raw == R_INT_NA) return RR_Error("can't mix NAs and negative subscripts");
+                        if (raw < 0 && -raw <= xlen) drop[-raw - 1] = 1;
+                    }
+                    for (int i = 0; i < xlen; ++i) if (!drop[i]) sel.push_back(i);
+                } else {
+                    // Positive 1-based positions; 0 selects nothing, out of range gives NA
+                    for (int k = 0; k < idx->Length(); ++k) {
+                        int raw = idx->GetInt(k);
+                        if (raw == 0) continue;
+                        sel.push_back((raw == R_INT_NA || raw > xlen) ? -1 : raw - 1);
+                    }
                 }
-                return res;
             }
 
-            // Integer index: for each index value k, take x[k] (1-based); 0 selects nothing
-            for(int k=0; k<idx->Length(); ++k) {
-                int raw = idx->GetInt(k);
-                if (raw == 0) continue;
-                int i = (raw == R_INT_NA) ? -1 : raw - 1;
-                if (i >= 0 && i < x->Length()) {
-                     if (x->type == RType::DOUBLE) res->d_vec.push_back(x->d_vec[i]);
-                     if (x->type == RType::INTEGER) res->i_vec.push_back(x->i_vec[i]);
-                     if (x->type == RType::LOGICAL) res->i_vec.push_back(x->i_vec[i]);
-                     if (x->type == RType::CHARACTER) res->s_vec.push_back(x->s_vec[i]);
-                     if (x->type == RType::LIST) res->l_vec.push_back(x->l_vec[i]);
+            auto out_names = std::make_shared<RValue>(RType::CHARACTER);
+            for (int i : sel) {
+                if (i >= 0) {
+                    if (x->type == RType::DOUBLE) res->d_vec.push_back(x->d_vec[i]);
+                    else if (x->type == RType::INTEGER || x->type == RType::LOGICAL) res->i_vec.push_back(x->i_vec[i]);
+                    else if (x->type == RType::CHARACTER) res->s_vec.push_back(x->s_vec[i]);
+                    else if (x->type == RType::LIST) res->l_vec.push_back(x->l_vec[i]);
                 } else {
                     if (x->type == RType::DOUBLE) res->d_vec.push_back(NAReal());
-                    if (x->type == RType::INTEGER) res->i_vec.push_back(R_INT_NA);
-                    if (x->type == RType::LOGICAL) res->i_vec.push_back(R_LOGICAL_NA);
-                    if (x->type == RType::CHARACTER) res->s_vec.push_back(R_STRING_NA);
-                    if (x->type == RType::LIST) res->l_vec.push_back(RR_Nil());
+                    else if (x->type == RType::INTEGER) res->i_vec.push_back(R_INT_NA);
+                    else if (x->type == RType::LOGICAL) res->i_vec.push_back(R_LOGICAL_NA);
+                    else if (x->type == RType::CHARACTER) res->s_vec.push_back(R_STRING_NA);
+                    else if (x->type == RType::LIST) res->l_vec.push_back(RR_Nil());
                 }
+                if (x_names) out_names->s_vec.push_back(i >= 0 && i < x_names->Length() ? AsStringAt(x_names, i) : MiniString(R_STRING_NA));
+            }
+            if (x_names) res->attributes["names"] = out_names;
+            // Subsetting a factor keeps it a factor
+            if (HasClass(x, "factor")) {
+                res->attributes["class"] = x->attributes["class"];
+                if (x->attributes.count("levels")) res->attributes["levels"] = x->attributes["levels"];
             }
             return res;
         }

@@ -476,6 +476,28 @@ namespace Evaluator {
                          }
                          if (lhs->type == RType::LIST && !lhs->l_vec.empty() && lhs->l_vec[0]->type == RType::SYMBOL) {
                              sub_op = lhs->l_vec[0]->sym_name;
+                             if (sub_op == "names" && lhs->l_vec.size() == 2 && lhs->l_vec[1]->type == RType::SYMBOL) {
+                                 // names(x) <- value
+                                 target_name = lhs->l_vec[1]->sym_name;
+                                 RValuePtr target_env = super_assign ? SuperAssignEnv(target_name, env) : env;
+                                 x = Lookup(target_name, target_env);
+                                 if (x->type == RType::ERROR) return x;
+                                 RValuePtr modified = CloneForAssign(x);
+                                 if (val->type == RType::NIL) {
+                                     modified->attributes.erase("names");
+                                 } else {
+                                     if (val->Length() > x->Length())
+                                         return RR_Error("'names' attribute [" + MiniToString(val->Length()) +
+                                                         "] must be the same length as the vector [" + MiniToString(x->Length()) + "]");
+                                     auto nms = std::make_shared<RValue>(RType::CHARACTER);
+                                     for (int i = 0; i < x->Length(); ++i)
+                                         nms->s_vec.push_back(i < val->Length() ? AsStringAt(val, i) : MiniString(R_STRING_NA));
+                                     modified->attributes["names"] = nms;
+                                 }
+                                 Define(target_name, modified, target_env);
+                                 R_Visible = false;
+                                 return val;
+                             }
                              if (sub_op == "[" || sub_op == "[[" || sub_op == "$") {
                                  if (lhs->l_vec.size() < 2) return RR_Error("Bad subassignment");
                                  RValuePtr target = lhs->l_vec[1];
