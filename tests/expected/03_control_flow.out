@@ -1,0 +1,48 @@
+> # 03 - Control flow
+> classify <- function(x) {
++   if (x < 0) {
++     "negative"
++   } else if (x == 0) {
++     "zero"
++   } else {
++     "positive"
++   }
++ }
+> sapply(c(-5, 0, 3), classify)
+[1] "negative" "zero"     "positive"
+
+> # for loops run over any vector; loops and assignments return invisibly
+> total <- 0
+> for (v in c(10, 20, 30)) total <- total + v
+> total
+[1] 60
+
+> # while loop: number of Collatz steps from 27 down to 1
+> collatz_steps <- function(n) {
++   steps <- 0
++   while (n != 1) {
++     if (n %% 2 == 0) n <- n / 2 else n <- 3 * n + 1
++     steps <- steps + 1
++   }
++   steps
++ }
+> collatz_steps(27)
+[1] 111
+
+> # && and || short-circuit: the right-hand side is only evaluated when needed
+> FALSE && undefined_function()
+[1] FALSE
+> TRUE || undefined_function()
+[1] TRUE
+> has_big_first <- function(x) length(x) > 0 && x[1] > 10
+> has_big_first(c())
+[1] FALSE
+> has_big_first(c(42, 1))
+[1] TRUE
+
+> # Vectorised FizzBuzz with nested ifelse()
+> n <- 1:15
+> ifelse(n %% 15 == 0, "FizzBuzz", ifelse(n %% 3 == 0, "Fizz", ifelse(n %% 5 == 0, "Buzz", n)))
+ [1] "1"        "2"        "Fizz"     "4"        "Buzz"     "Fizz"    
+ [7] "7"        "8"        "Fizz"     "Buzz"     "11"       "Fizz"    
+[13] "13"       "14"       "FizzBuzz"

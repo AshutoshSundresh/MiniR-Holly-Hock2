@@ -16,7 +16,10 @@ $(TARGET): $(OBJS)
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
+test: $(TARGET)
+	sh tests/run_tests.sh ./$(TARGET)
+
 clean:
 	rm -f $(OBJS) $(TARGET)
 
-.PHONY: all clean
+.PHONY: all clean test

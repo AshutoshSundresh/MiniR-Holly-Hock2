@@ -5,8 +5,12 @@
 class Parser {
 public:
     Parser(const MiniVector<Token>& tokens);
+    // Source lines (1-based, inclusive) that a top-level statement spans.
+    struct StatementLines { int first; int last; };
+
     // Parses every top-level expression (separated by newlines or ';').
-    MiniVector<RValuePtr> ParseProgram();
+    // If lines is given, it receives one entry per returned expression.
+    MiniVector<RValuePtr> ParseProgram(MiniVector<StatementLines>* lines = nullptr);
     bool HasError() const { return error_state; }
     // True when the error was hitting end of input (e.g. `x <- 1 +`), so more lines may complete it.
     bool IsIncomplete() const { return error_state && incomplete; }

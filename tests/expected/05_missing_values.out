@@ -1,0 +1,35 @@
+> # 05 - Missing values (NA)
+> v <- c(4, NA, 7, NA, 1)
+> v + 1                          # NA propagates through arithmetic
+[1]  5 NA  8 NA  2
+> sum(v)
+[1] NA
+> sum(v, na.rm = TRUE)
+[1] 12
+> mean(v, na.rm = TRUE)
+[1] 4
+> is.na(v)
+[1] FALSE  TRUE FALSE  TRUE FALSE
+> v[!is.na(v)]
+[1] 4 7 1
+> ifelse(is.na(v), 0, v)
+[1] 4 0 7 0 1
+
+> # Three-valued logic
+> NA > 1
+[1] NA
+> NA && FALSE                    # FALSE no matter what the NA is
+[1] FALSE
+> NA || TRUE
+[1] TRUE
+
+> # Character NA is distinct from the string "NA"
+> words <- c("apple", NA, "cherry")
+> words
+[1] "apple"  NA       "cherry"
+> is.na(words)
+[1] FALSE  TRUE FALSE
+> nchar(words)
+[1]  5 NA  6
+> paste("fruit:", words)         # paste() spells it out as "NA"
+[1] "fruit: apple"  "fruit: NA"     "fruit: cherry"

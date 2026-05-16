@@ -1,0 +1,52 @@
+> # 02 - Functions and closures
+> square <- function(x) x^2
+> square(1:5)
+[1]  1  4  9 16 25
+
+> # Defaults are evaluated in the call frame, so they can use earlier arguments
+> area <- function(w, h = w) w * h
+> area(3)
+[1] 9
+> area(3, 4)
+[1] 12
+> area(h = 2, w = 5)          # names match first, then remaining arguments by position
+[1] 10
+
+> # Recursion
+> fib <- function(n) if (n < 2) n else fib(n - 1) + fib(n - 2)
+> fib(20)
+[1] 6765
+
+> # Closures capture the environment they were created in
+> make_adder <- function(n) function(x) x + n
+> add10 <- make_adder(10)
+> add10(5)
+[1] 15
+
+> # <<- assigns in the enclosing environment: a counter with private state
+> make_counter <- function() {
++   count <- 0
++   function() {
++     count <<- count + 1
++     count
++   }
++ }
+> counter <- make_counter()
+> counter()
+[1] 1
+> counter()
+[1] 2
+> counter()
+[1] 3
+
+> # Functions are values: pass them to sapply / lapply
+> sapply(1:6, function(i) i * i)
+[1]  1  4  9 16 25 36
+> sapply(c(4, 9, 16), sqrt)
+[1] 2 3 4
+> lapply(1:2, function(i) rep(i, i))
+[[1]]
+[1] 1
+
+[[2]]
+[1] 2 2

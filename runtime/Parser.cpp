@@ -103,11 +103,12 @@ int Parser::GetPrecedence(TokenType t) const {
     }
 }
 
-MiniVector<RValuePtr> Parser::ParseProgram() {
+MiniVector<RValuePtr> Parser::ParseProgram(MiniVector<StatementLines>* lines) {
     MiniVector<RValuePtr> exprs;
     while (true) {
         while (Match(TokenType::newline) || Match(TokenType::semicolon));
         if (Check(TokenType::eof)) break;
+        int first_line = Current().line;
         RValuePtr e = ParseExpression();
         if (error_state) break;
         if (!AtStatementEnd()) {
@@ -115,6 +116,7 @@ MiniVector<RValuePtr> Parser::ParseProgram() {
             break;
         }
         exprs.push_back(e);
+        if (lines) lines->push_back({first_line, pos > 0 ? tokens[pos - 1].line : first_line});
     }
     return exprs;
 }

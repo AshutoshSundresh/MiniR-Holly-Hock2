@@ -1,0 +1,45 @@
+> # 07 - Data frames and factors
+> people <- data.frame(
++   name = c("Ana", "Ben", "Cy", "Dee"),
++   age = c(34, 28, 45, 39),
++   height = c(165.5, 180, 172.25, 158)
++ )
+> people
+  name age height
+1  Ana  34 165.50
+2  Ben  28 180.00
+3   Cy  45 172.25
+4  Dee  39 158.00
+> nrow(people)
+[1] 4
+> names(people)
+[1] "name"   "age"    "height"
+> people$age
+[1] 34 28 45 39
+> mean(people$height)
+[1] 168.9375
+> people[people$age > 30, ]      # filter rows (original row names are kept)
+  name age height
+1  Ana  34 165.50
+3   Cy  45 172.25
+4  Dee  39 158.00
+> people[, "name"]               # a single column comes back as a vector
+[1] "Ana" "Ben" "Cy"  "Dee"
+> people[order(people$age), ]    # sort rows by a column
+  name age height
+2  Ben  28 180.00
+1  Ana  34 165.50
+4  Dee  39 158.00
+3   Cy  45 172.25
+
+> # Factors store categories as integer codes plus levels
+> sizes <- factor(c("small", "large", "medium", "small", "small"))
+> sizes
+[1] small  large  medium small  small 
+Levels: large medium small
+> levels(sizes)
+[1] "large"  "medium" "small" 
+> table(c("small", "large", "medium", "small", "small"))
+
+ large medium  small 
+     1      1      3 

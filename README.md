@@ -70,3 +70,39 @@ df <- data.frame(Height=c(60,65,70), Weight=c(120,150,180))
 df$Height
 df[df$Weight > 130, ]
 ```
+
+## Running scripts
+
+`minir file.R` runs a script without the interactive prompt, printing visible results
+and stopping at the first error. Add `--echo` to get an R-style transcript, with each
+statement shown before its output:
+
+```
+$ minir --echo tests/02_functions.R
+> # 02 - Functions and closures
+> square <- function(x) x^2
+> square(1:5)
+[1]  1  4  9 16 25
+...
+```
+
+## Tests
+
+`tests/` holds annotated example scripts covering each area of the language. Each one
+has an expected transcript in `tests/expected/`:
+
+| Script | Covers |
+|---|---|
+| `01_basics.R` | arithmetic, recycling, precedence, integer vs double, number printing |
+| `02_functions.R` | defaults, named arguments, recursion, closures, `<<-`, `sapply`/`lapply` |
+| `03_control_flow.R` | `if`/`else`, `for`, `while`, short-circuit `&&`/`||`, vectorised FizzBuzz |
+| `04_vectors.R` | names, logical/negative/name indexing, `seq`/`rep`, `order`, `%in%` |
+| `05_missing_values.R` | NA propagation, `na.rm`, three-valued logic, character NA |
+| `06_matrices.R` | `matrix`, `t`, `%*%`, row/column subsetting, `rowSums`, `diag` |
+| `07_data_frames.R` | data frames, filtering and sorting rows, factors, `table` |
+| `08_stats_random.R` | `mean`/`var`/`sd`, reproducible `set.seed`/`runif`/`sample` |
+| `09_errors.R` | errors aborting a function body and the script |
+
+Run them all with `make test`, or `sh tests/run_tests.sh` after building with
+`build_msvc.bat` (Git Bash works on Windows). `sh tests/run_tests.sh --update`
+regenerates the expected transcripts after an intentional output change.
