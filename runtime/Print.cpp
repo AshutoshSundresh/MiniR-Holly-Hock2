@@ -318,4 +318,66 @@ namespace Evaluator {
         return s;
     }
 
+    // --- Builtins ---
+
+    // print(x): show x as the REPL would and return it invisibly
+    RValuePtr Builtin_Print(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
+        if (args.empty()) return RR_Error("argument \"x\" is missing, with no default");
+        MiniString s = ToString(args[0]);
+        std::fputs(s.c_str(), stdout);
+        std::fputs("\n", stdout);
+        R_Visible = false;
+        return args[0];
+    }
+
+    // Flatten one cat() argument into output pieces; lists contribute their elements.
+    static RValuePtr CatPieces(RValuePtr v, int arg_no, MiniVector<MiniString>& out) {
+        switch (v->type) {
+            case RType::NIL:
+                return nullptr;
+            case RType::LIST:
+                for (auto& e : v->l_vec) {
+                    if (RValuePtr err = CatPieces(e, arg_no, out)) return err;
+                }
+                return nullptr;
+            case RType::DOUBLE:
+                for (double d : v->d_vec) out.push_back(FormatNumber(d));
+                return nullptr;
+            case RType::INTEGER:
+            case RType::LOGICAL:
+            case RType::CHARACTER:
+                for (int i = 0; i < v->Length(); ++i) {
+                    MiniString s = AsStringAt(v, i);
+                    out.push_back(IsNAString(s) ? MiniString("NA") : s);
+                }
+                return nullptr;
+            default: {
+                const char* type = v->type == RType::CLOSURE || v->type == RType::BUILTIN ? "closure" : "environment";
+                return RR_Error("argument " + MiniToString(arg_no) + " (type '" + type + "') cannot be handled by 'cat'");
+            }
+        }
+    }
+
+    // cat(..., sep = " "): write the values unquoted, without a trailing newline
+    RValuePtr Builtin_Cat(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env) {
+        MiniString sep = " ";
+        MiniVector<MiniString> pieces;
+        for (size_t i = 0; i < args.size(); ++i) {
+            if (i < names.size() && names[i] == "sep") {
+                if (args[i]->type != RType::CHARACTER || args[i]->Length() == 0) return RR_Error("invalid 'sep' specification");
+                sep = args[i]->s_vec[0];
+                continue;
+            }
+            if (RValuePtr err = CatPieces(args[i], (int)i + 1, pieces)) return err;
+        }
+        MiniString out;
+        for (size_t i = 0; i < pieces.size(); ++i) {
+            if (i) out += sep;
+            out += pieces[i];
+        }
+        std::fputs(out.c_str(), stdout);
+        R_Visible = false;
+        return RR_Nil();
+    }
+
 } // namespace Evaluator

@@ -15,6 +15,7 @@ namespace {
         bool in_single = false, in_double = false;
         for (size_t i = 0; i < s.size(); ++i) {
             char c = s[i];
+            if ((in_single || in_double) && c == '\\') { ++i; continue; } // skip escaped char
             if (!in_double && c == '\'') { in_single = !in_single; continue; }
             if (!in_single && c == '"') { in_double = !in_double; continue; }
             if (in_single || in_double) continue;

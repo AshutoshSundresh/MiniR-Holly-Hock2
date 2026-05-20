@@ -40,6 +40,8 @@ namespace Evaluator {
     MiniString FormatDataFrame(RValuePtr v);
     MiniString FormatList(RValuePtr v);
     MiniString FormatNumber(double x); // one number with 7 significant digits, as cat() shows it
+    RValuePtr Builtin_Print(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env);
+    RValuePtr Builtin_Cat(const MiniVector<RValuePtr>& args, const MiniVector<MiniString>& names, RValuePtr env);
 
     // --- ApplyFunction / Eval forward declarations ---
     RValuePtr ApplyFunction(RValuePtr func, const MiniVector<RValuePtr>& args, RValuePtr env);

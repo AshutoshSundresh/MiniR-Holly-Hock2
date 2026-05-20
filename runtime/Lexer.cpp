@@ -196,7 +196,18 @@ Token Lexer::ScanToken() {
         Advance();
         MiniString text;
         while (Current() != quote && Current() != '\0') {
-            text.push_back(Current());
+            char ch = Current();
+            if (ch == '\\' && Peek() != '\0') {
+                // Escape sequences: \n \t \r \\ \" \' (anything else keeps the character)
+                Advance();
+                char e = Current();
+                if (e == 'n') ch = '\n';
+                else if (e == 't') ch = '\t';
+                else if (e == 'r') ch = '\r';
+                else ch = e;
+            }
+            if (ch == '\n') line++;
+            text.push_back(ch);
             Advance();
         }
         if (Current() == quote) Advance();

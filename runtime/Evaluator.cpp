@@ -384,6 +384,9 @@ namespace Evaluator {
         REG("character", Builtin_Character);
         REG("logical", Builtin_Logical);
         
+        REG("print", Builtin_Print);
+        REG("cat", Builtin_Cat);
+
         REG("paste", Builtin_Paste);
         REG("paste0", Builtin_Paste0);
         
